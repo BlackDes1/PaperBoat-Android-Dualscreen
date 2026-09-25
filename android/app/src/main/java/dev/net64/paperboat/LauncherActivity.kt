@@ -237,10 +237,17 @@ class LauncherActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Makes [region] the game to run, then goes into the main menu, or
+     * straight into the game when [EXTRA_START_GAME] asks — the Mods and Saves
+     * screens restart the game that way.
+     */
     private fun startGame(region: Region) {
         GameAssets.setActiveRegion(this, region)
         GameAssets.stopGameRunningOtherThan(this, region)
-        startActivity(Intent(this, MainActivity::class.java))
+        val next =
+            if (intent.getBooleanExtra(EXTRA_START_GAME, false)) MainActivity::class.java else MenuActivity::class.java
+        startActivity(Intent(this, next))
         finish()
 
         // This activity has its own process and the game runs in the main one,
@@ -258,8 +265,9 @@ class LauncherActivity : ComponentActivity() {
             "game data ships with the app.\n\n" +
             "Mods go in ${GameAssets.modsDir(this)}."
 
-    private companion object {
-        const val COPY_BUFFER_BYTES = 1 shl 17
-        const val EXTRA_EXTRACT = "extract"
+    companion object {
+        const val EXTRA_START_GAME = "dev.net64.paperboat.START_GAME"
+        private const val COPY_BUFFER_BYTES = 1 shl 17
+        private const val EXTRA_EXTRACT = "extract"
     }
 }
