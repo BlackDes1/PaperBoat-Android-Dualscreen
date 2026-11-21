@@ -66,6 +66,9 @@ unsigned companion_copy_page(int page, char* out, int size);
 /* Text of one tattle (index from the tattle page), built on the game thread. */
 void companion_want_tattle_text(int actorType);
 
+/* game byte -> UTF-8 of the standard charset, NULL past its end (companion_game.c) */
+const char* companion_charset(int code);
+
 #ifdef __cplusplus
 }
 #endif

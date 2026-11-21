@@ -29,6 +29,17 @@ object CompanionBridge {
 
     @JvmStatic private external fun nativeTattleText(actorType: Int): String?
 
+    // Game art (CompanionArt.cpp): { width, height, ARGB pixels... } or null.
+    @JvmStatic private external fun nativeArt(id: Int): IntArray?
+
+    @JvmStatic private external fun nativeItemIcon(item: Int): IntArray?
+
+    @JvmStatic private external fun nativeFont(): IntArray?
+
+    @JvmStatic private external fun nativeFontWidths(): ByteArray?
+
+    @JvmStatic private external fun nativeCharset(): String?
+
     fun page(page: Int): String =
         if (!available) "" else runCatching { nativePage(page) }.getOrDefault("")
 
@@ -42,4 +53,14 @@ object CompanionBridge {
 
     fun tattleText(actorType: Int): String? =
         if (!available) null else runCatching { nativeTattleText(actorType) }.getOrNull()
+
+    fun art(id: Int): IntArray? = if (!available) null else runCatching { nativeArt(id) }.getOrNull()
+
+    fun itemIcon(item: Int): IntArray? = if (!available) null else runCatching { nativeItemIcon(item) }.getOrNull()
+
+    fun font(): IntArray? = if (!available) null else runCatching { nativeFont() }.getOrNull()
+
+    fun fontWidths(): ByteArray? = if (!available) null else runCatching { nativeFontWidths() }.getOrNull()
+
+    fun charset(): String? = if (!available) null else runCatching { nativeCharset() }.getOrNull()
 }

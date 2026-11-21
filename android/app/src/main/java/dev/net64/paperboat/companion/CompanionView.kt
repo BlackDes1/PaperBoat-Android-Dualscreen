@@ -8,7 +8,6 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
-import android.graphics.Typeface
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
@@ -21,13 +20,15 @@ import kotlin.math.min
 /**
  * The bottom screen: Star Haven's 3DS touch menu, redrawn for Android.
  *
- * Everything is laid out on the 3DS's 320x240 grid and scaled to the view, so
- * the proportions match the 3DS whatever the display. With [fill] the panel
- * stretches its width to the view instead of letterboxing (second displays
- * whose shape is far from 4:3).
+ * Like Star Haven (port/3ds/source/platform/bottom_screen.c) it is built from
+ * the game's own art — pause-menu icons, partner portraits, the world map,
+ * item icons and the dialogue font (see [CompanionArt]) — on the pause menu's
+ * orange and cream. Everything is laid out on the 3DS's 320x240 grid and
+ * scaled to the view, so the proportions match the 3DS on any display; with
+ * [fill] the grid stretches to the view instead of letterboxing.
  *
- * A rail of tabs runs down the left; the panel beside it shows the tab's page.
- * Data comes from [CompanionBridge] as JSON, polled while the view is shown.
+ * A rail of tabs runs down the left, the page beside it, a row of buttons
+ * underneath. Data comes from [CompanionBridge] as JSON, polled while shown.
  */
 class CompanionView(
     context: Context,
@@ -41,17 +42,21 @@ class CompanionView(
             invalidate()
         }
 
+    private val art = CompanionArt { postInvalidate() }
+
     // ---- tabs ----------------------------------------------------------------
-    private enum class Tab(val label: String, val short: String, val page: Int) {
-        STATS("Stats", "Stats", CompanionBridge.PAGE_STATS),
-        MAP("Map", "Map", CompanionBridge.PAGE_STATS),
-        PARTY("Party", "Party", CompanionBridge.PAGE_STATS),
-        TATTLE("Tattle", "Tattle", CompanionBridge.PAGE_TATTLE),
-        RECIPES("Recipes", "Cook", CompanionBridge.PAGE_RECIPES),
-        BADGES("Badges", "Badge", CompanionBridge.PAGE_BADGES),
-        ITEMS("Items", "Items", CompanionBridge.PAGE_ITEMS),
-        OPTIONS("Options", "Opt.", -1),
+    private enum class Tab(val label: String, val page: Int) {
+        STATS("Stats", CompanionBridge.PAGE_STATS),
+        MAP("Map", CompanionBridge.PAGE_STATS),
+        PARTY("Party", CompanionBridge.PAGE_STATS),
+        TATTLE("Tattle", CompanionBridge.PAGE_TATTLE),
+        RECIPES("Recipes", CompanionBridge.PAGE_RECIPES),
+        BADGES("Badges", CompanionBridge.PAGE_BADGES),
+        ITEMS("Items", CompanionBridge.PAGE_ITEMS),
+        OPTIONS("Options", -1),
     }
+
+    private val railTabs = Tab.entries.filter { it != Tab.OPTIONS }
 
     private var tab = Tab.entries.getOrElse(settings.lastTab) { Tab.STATS }
 
@@ -65,46 +70,47 @@ class CompanionView(
     private var tattleOpen = -1
     private var tattleName = ""
     private var tattleText: String? = null
+    private var tattlePage = 0
 
     private var scroll = 0f
     private var maxScroll = 0f
 
-    // ---- geometry (3DS bottom-screen pixels) ----------------------------------
+    private var mapX = -1f
+    private var mapY = -1f
+    private var mapFollow = true
+    private var mapLabel = ""
+
+    // ---- geometry (3DS bottom-screen pixels, as Star Haven) ----------------------
     private val gridW = 320f
     private val gridH = 240f
-    private val railW = 46f
-    private val tabH = gridH / Tab.entries.size
-    private val panel = RectF(railW + 4f, 4f, gridW - 4f, gridH - 4f)
-    private val buttonsH = 26f
+    private val railX1 = 50f
+    private val railY0 = 6f
+    private val tabH = 200f / railTabs.size
+    private val panel = RectF(railX1, 4f, 316f, 206f)
+    private val cx0 = 58f
+    private val cx1 = 308f
+    private val headY = 10f
+    private val subY = 28f
+    private val bodyY = 46f
+    private val btnY0 = 212f
+    private val btnY1 = 234f
 
     private var scaleX = 1f
     private var scaleY = 1f
     private var offX = 0f
     private var offY = 0f
 
-    // ---- paints ----------------------------------------------------------------
+    // ---- paints ------------------------------------------------------------------
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 1.5f
-    }
-    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-        textSize = 11f
-        color = COL_INK
-    }
-    private val small = Paint(text).apply {
-        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
-        textSize = 9f
-    }
     private val bg = Paint()
-    private var bgHeight = -1f
+    private var bgReady = false
+    private val tmp = RectF()
 
     // Hit regions of the current frame, in grid pixels.
     private data class Hit(val rect: RectF, val action: () -> Unit)
     private val hits = ArrayList<Hit>()
 
-    // ---- polling ---------------------------------------------------------------
+    // ---- polling -------------------------------------------------------------------
     private val poll = object : Runnable {
         override fun run() {
             refresh()
@@ -164,15 +170,83 @@ class CompanionView(
         tattleOpen = -1
         lastPageText = ""
         pageJson = JSONObject()
+        mapFollow = true
+        mapLabel = ""
         refresh()
         invalidate()
     }
 
-    // ---- drawing -----------------------------------------------------------------
+    // ---- drawing primitives (Star Haven's) -------------------------------------------
+
+    private fun round(x0: Float, y0: Float, x1: Float, y1: Float, r: Float, color: Int, c: Canvas) {
+        fillPaint.color = color
+        tmp.set(x0, y0, x1, y1)
+        c.drawRoundRect(tmp, r, r, fillPaint)
+    }
+
+    /** Shadow, brown rim, cream face: the pause menu's panels. */
+    private fun panelBox(c: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, face: Int) {
+        round(x0 + 3, y0 + 3, x1 + 3, y1 + 3, 8f, COL_SHADOW, c)
+        round(x0, y0, x1, y1, 8f, COL_PANEL_EDGE, c)
+        round(x0 + 2, y0 + 2, x1 - 2, y1 - 2, 6f, face, c)
+    }
+
+    private fun card(c: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, face: Int = COL_CARD) {
+        round(x0, y0, x1, y1, 6f, COL_CARD_RIM, c)
+        round(x0 + 1, y0 + 1, x1 - 1, y1 - 1, 5f, face, c)
+    }
+
+    private fun tile(c: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, r: Float, face: Int) {
+        round(x0 + 2, y0 + 2, x1 + 2, y1 + 2, r, COL_SHADOW, c)
+        round(x0, y0, x1, y1, r, COL_PANEL_EDGE, c)
+        round(x0 + 2, y0 + 2, x1 - 2, y1 - 2, r - 2, face, c)
+    }
+
+    /** A brown button with a white label. */
+    private fun chip(c: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, label: String, scale: Float, on: Boolean = true) {
+        round(x0, y0, x1, y1, 7f, if (on) COL_PANEL_EDGE else COL_BTN_OFF, c)
+        round(x0 + 2, y0 + 2, x1 - 2, y1 - 2, 5f, if (on) COL_BTN else COL_BTN_OFF, c)
+        val s = art.fit(label, x1 - x0 - 6f, scale, scale * 0.6f)
+        art.textCentered(c, (x0 + x1) / 2f, (y0 + y1) / 2f - 8f * s, label, s, white = true, alpha = if (on) 255 else 150)
+    }
+
+    private fun bar(c: Canvas, x: Float, y: Float, w: Float, h: Float, v: Int, max: Int, col: Int) {
+        round(x - 1, y - 1, x + w + 1, y + h + 1, h / 2 + 1, COL_PANEL_EDGE, c)
+        round(x, y, x + w, y + h, h / 2, COL_BAR_BACK, c)
+        if (max > 0 && v > 0) {
+            val fw = max(h, w * min(v, max) / max.toFloat())
+            round(x, y, x + fw, y + h, h / 2, col, c)
+        }
+    }
+
+    private fun image(c: Canvas, id: Int, x: Float, y: Float, scale: Float = 1f, dim: Boolean = false, alpha: Int = 255): Boolean {
+        val b = art.image(id) ?: return false
+        art.draw(c, b, x, y, scale, dim, alpha)
+        return true
+    }
+
+    private fun icon(c: Canvas, id: Int, x: Float, y: Float, size: Float, dim: Boolean = false): Boolean {
+        val b = art.image(id) ?: return false
+        art.drawFit(c, b, x, y, size, dim)
+        return true
+    }
+
+    private fun itemIcon(c: Canvas, item: Int, x: Float, y: Float, size: Float, dim: Boolean = false, alpha: Int = 255): Boolean {
+        val b = art.itemIcon(item) ?: return false
+        art.drawFit(c, b, x, y, size, dim, alpha)
+        return true
+    }
+
+    private fun pageTitle(c: Canvas, title: String, sub: String?) {
+        art.text(c, cx0 + 2, headY, title, art.fit(title, 160f, 1.05f, 0.7f))
+        if (sub != null) art.text(c, cx0 + 2, subY, sub, art.fit(sub, cx1 - cx0 - 4, 0.8f, 0.55f), alpha = 200)
+    }
+
+    // ---- frame ------------------------------------------------------------------------
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        bgHeight = -1f
+        bgReady = false
     }
 
     private fun computeTransform() {
@@ -200,251 +274,294 @@ class CompanionView(
         canvas.scale(scaleX, scaleY)
         canvas.clipRect(0f, 0f, gridW, gridH)
 
-        if (bgHeight != gridH) {
+        if (!bgReady) {
             bg.shader = LinearGradient(0f, 0f, 0f, gridH, COL_BG_TOP, COL_BG_BOTTOM, Shader.TileMode.CLAMP)
-            bgHeight = gridH
+            bgReady = true
         }
         canvas.drawRect(0f, 0f, gridW, gridH, bg)
 
         hits.clear()
+        panelBox(canvas, panel.left, panel.top, panel.right, panel.bottom, COL_PANEL)
+        drawPage(canvas)
         drawRail(canvas)
-        drawPanel(canvas)
+        drawButtons(canvas)
         canvas.restore()
     }
 
+    private fun inGame() = stats.optInt("inGame") == 1
+
+    /** After the panel: the active tab runs into the panel's rim. */
     private fun drawRail(c: Canvas) {
-        val inGame = stats.optInt("inGame") == 1
-        for (t in Tab.entries) {
-            val top = t.ordinal * tabH
-            val r = RectF(2f, top + 1.5f, railW + (if (t == tab) 4f else 0f), top + tabH - 1.5f)
-            fillPaint.color = if (t == tab) COL_PANEL else COL_TAB
-            c.drawRoundRect(r, 5f, 5f, fillPaint)
-            val enabled = inGame || t == Tab.OPTIONS
-            small.color = if (enabled) COL_INK else COL_INK_DIM
-            small.textAlign = Paint.Align.CENTER
-            c.drawText(t.short, (r.left + railW) / 2f, r.centerY() + 3f, small)
-            small.textAlign = Paint.Align.LEFT
-            small.color = COL_INK
-            if (enabled) hits += Hit(r) { selectTab(t) }
+        val inGame = inGame()
+        railTabs.forEachIndexed { i, t ->
+            val on = t == tab
+            val y0 = railY0 + i * tabH
+            val y1 = y0 + tabH - 1f
+            val x0 = if (on) 4f else 7f
+            val x1 = if (on) railX1 + 4f else railX1 - 2f
+            round(x0 + 2, y0 + 2, x1 + 2, y1 + 2, 7f, COL_SHADOW, c)
+            round(x0, y0, x1, y1, 7f, COL_PANEL_EDGE, c)
+            round(x0 + 2, y0 + 2, if (on) x1 else x1 - 2, y1 - 2, 5f, if (on) COL_PANEL else COL_TAB, c)
+            val cx = (x0 + railX1 - 2f) / 2f + if (on) 1f else 0f
+            val iconSize = tabH - 13f
+            val enabled = inGame
+            when (t) {
+                Tab.STATS -> icon(c, CompanionArt.MARIO, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
+                Tab.MAP -> icon(c, CompanionArt.MAP_LOCATION, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
+                Tab.PARTY -> icon(c, CompanionArt.PARTNER + 2, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
+                Tab.TATTLE -> icon(c, CompanionArt.PARTNER + 1, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
+                Tab.RECIPES -> itemIcon(c, CompanionArt.ITEM_FRYING_PAN, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
+                Tab.BADGES -> icon(c, CompanionArt.BP, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
+                Tab.ITEMS -> itemIcon(c, CompanionArt.ITEM_MUSHROOM, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
+                Tab.OPTIONS -> Unit
+            }
+            val s = art.fit(t.label, railX1 - 8f, 0.62f, 0.45f)
+            art.textCentered(c, cx, y1 - 2f - 15f * s, t.label, s, alpha = if (enabled) 255 else 120)
+            if (enabled) hits += Hit(RectF(0f, y0, railX1 + 2f, y1)) { selectTab(t) }
         }
     }
 
-    private fun drawPanel(c: Canvas) {
-        fillPaint.color = COL_SHADOW
-        c.drawRoundRect(RectF(panel.left + 2f, panel.top + 2f, panel.right + 2f, panel.bottom + 2f), 8f, 8f, fillPaint)
-        fillPaint.color = COL_PANEL
-        c.drawRoundRect(panel, 8f, 8f, fillPaint)
-        strokePaint.color = COL_PANEL_EDGE
-        c.drawRoundRect(panel, 8f, 8f, strokePaint)
+    /** Options, then the shortcuts the 3DS screen offers in the world: Items, Partner, Pause. */
+    private fun drawButtons(c: Canvas) {
+        val battle = stats.optInt("battle") == 1
+        val world = inGame() && !battle
+        val gap = 4f
+        val w = (gridW - 16f - gap * 3) / 4f
+        fun button(i: Int, label: String, on: Boolean, action: () -> Unit) {
+            val x0 = 8f + i * (w + gap)
+            chip(c, x0, btnY0, x0 + w, btnY1, label, 0.8f, on)
+            if (on) hits += Hit(RectF(x0, btnY0, x0 + w, btnY1), action)
+        }
+        button(0, if (tab == Tab.OPTIONS) "Back" else "Options", true) {
+            selectTab(if (tab == Tab.OPTIONS) Tab.STATS else Tab.OPTIONS)
+        }
+        button(1, "Items", world) { CompanionBridge.request(CompanionBridge.REQ_ITEM_MENU) }
+        button(2, "Partner", world) { CompanionBridge.request(CompanionBridge.REQ_PARTNER_MENU) }
+        button(3, "Pause", world) { CompanionBridge.request(CompanionBridge.REQ_PAUSE) }
+    }
 
-        val inGame = stats.optInt("inGame") == 1
+    private fun drawPage(c: Canvas) {
         if (tab == Tab.OPTIONS) {
             drawOptions(c)
             return
         }
-        if (!inGame) {
-            text.textAlign = Paint.Align.CENTER
-            c.drawText("Paperboat", panel.centerX(), panel.centerY() - 8f, text)
-            small.textAlign = Paint.Align.CENTER
-            c.drawText("Load a file to fill this screen.", panel.centerX(), panel.centerY() + 8f, small)
-            small.textAlign = Paint.Align.LEFT
-            text.textAlign = Paint.Align.LEFT
+        if (!inGame()) {
+            drawTitle(c)
             return
         }
-        val body = RectF(panel.left + 6f, panel.top + 4f, panel.right - 6f, panel.bottom - buttonsH - 2f)
         when (tab) {
-            Tab.STATS -> drawStats(c, body)
-            Tab.MAP -> drawMap(c, body)
-            Tab.PARTY -> drawParty(c, body)
-            Tab.TATTLE -> if (tattleOpen >= 0) drawTattleText(c, body) else drawTattle(c, body)
-            Tab.RECIPES -> drawRecipes(c, body)
-            Tab.BADGES -> drawBadges(c, body)
-            Tab.ITEMS -> drawItems(c, body)
+            Tab.STATS -> drawStats(c)
+            Tab.MAP -> drawMap(c)
+            Tab.PARTY -> drawParty(c)
+            Tab.TATTLE -> if (tattleOpen >= 0) drawTattleText(c) else drawTattle(c)
+            Tab.RECIPES -> drawRecipes(c)
+            Tab.BADGES -> drawBadges(c)
+            Tab.ITEMS -> drawItems(c)
             Tab.OPTIONS -> Unit
         }
-        drawButtons(c)
     }
 
-    /** Items / Partner / Pause: the shortcuts the 3DS screen offers in the world. */
-    private fun drawButtons(c: Canvas) {
+    private fun drawTitle(c: Canvas) {
+        val mid = (cx0 + cx1) / 2f
+        icon(c, CompanionArt.MARIO, mid - 16f, 64f, 32f)
+        art.textCentered(c, mid, 104f, "Paper Mario", 1.2f)
+        art.textCentered(c, mid, 130f, "Load a file to fill this screen.", 0.75f, alpha = 200)
+    }
+
+    // ---- Stats ---------------------------------------------------------------------------
+
+    private fun chapterLabel(ch: Int) = when (ch) {
+        0 -> "Prologue"
+        9 -> "Epilogue"
+        else -> "Chapter $ch"
+    }
+
+    private fun drawStats(c: Canvas) {
         val battle = stats.optInt("battle") == 1
-        val labels = listOf(
-            "Items" to CompanionBridge.REQ_ITEM_MENU,
-            "Partner" to CompanionBridge.REQ_PARTNER_MENU,
-            "Pause" to CompanionBridge.REQ_PAUSE,
-        )
-        val y0 = panel.bottom - buttonsH + 2f
-        val w = (panel.width() - 16f) / labels.size
-        labels.forEachIndexed { i, (label, req) ->
-            val r = RectF(panel.left + 6f + i * (w + 2f), y0, panel.left + 6f + i * (w + 2f) + w, panel.bottom - 4f)
-            fillPaint.color = if (battle) COL_BTN_OFF else COL_BTN
-            c.drawRoundRect(r, 6f, 6f, fillPaint)
-            small.color = Color.WHITE
-            small.textAlign = Paint.Align.CENTER
-            c.drawText(label, r.centerX(), r.centerY() + 3f, small)
-            small.textAlign = Paint.Align.LEFT
-            small.color = COL_INK
-            if (!battle) hits += Hit(r) { CompanionBridge.request(req) }
-        }
-    }
+        val location = if (battle) "Battle!" else stats.optString("location")
+        art.text(c, cx0 + 2, headY, location, art.fit(location, 188f, 1.05f, 0.7f))
 
-    private fun bar(c: Canvas, x: Float, y: Float, w: Float, cur: Int, max: Int, color: Int) {
-        val r = RectF(x, y, x + w, y + 7f)
-        fillPaint.color = COL_BAR_BACK
-        c.drawRoundRect(r, 3f, 3f, fillPaint)
-        if (max > 0) {
-            fillPaint.color = color
-            c.drawRoundRect(RectF(x, y, x + w * (cur.coerceIn(0, max) / max.toFloat()), y + 7f), 3f, 3f, fillPaint)
-        }
-    }
-
-    private fun drawStats(c: Canvas, b: RectF) {
-        val battle = stats.optInt("battle") == 1
-        var y = b.top + 10f
-        val chapter = stats.optInt("chapter")
-        val chapterText = when (chapter) {
-            0 -> "Prologue"
-            9 -> "Epilogue"
-            else -> "Chapter $chapter"
-        }
-        c.drawText(if (battle) "Battle!" else stats.optString("location"), b.left, y, text)
-        small.textAlign = Paint.Align.RIGHT
-        c.drawText(chapterText, b.right, y, small)
-        small.textAlign = Paint.Align.LEFT
-        y += 14f
-
-        val hp = stats.optInt("hp")
-        val maxHp = stats.optInt("maxHp")
-        val fp = stats.optInt("fp")
-        val maxFp = stats.optInt("maxFp")
-        c.drawText("HP", b.left, y + 6f, text)
-        bar(c, b.left + 20f, y, b.width() - 70f, hp, maxHp, COL_HP)
-        c.drawText("$hp/$maxHp", b.right - 46f, y + 7f, small)
-        y += 14f
-        c.drawText("FP", b.left, y + 6f, text)
-        bar(c, b.left + 20f, y, b.width() - 70f, fp, maxFp, COL_FP)
-        c.drawText("$fp/$maxFp", b.right - 46f, y + 7f, small)
-        y += 16f
-
-        // Star Power: one star per 256, partial star as a bar like the HUD.
+        // chapter, then Star Power as the HUD's little stars
+        var x = art.text(c, cx0 + 2, subY, chapterLabel(stats.optInt("chapter")), 0.8f, alpha = 200) + 8f
         val power = stats.optInt("starPower")
         val maxPower = stats.optInt("maxStarPower")
-        c.drawText("Star", b.left, y + 6f, small)
-        for (i in 0 until maxPower) {
-            val cx = b.left + 34f + i * 14f
-            val level = ((power - i * 256) / 256f).coerceIn(0f, 1f)
-            fillPaint.color = COL_BAR_BACK
-            c.drawCircle(cx, y + 3f, 5.5f, fillPaint)
-            if (level > 0f) {
-                fillPaint.color = COL_STAR
-                c.drawCircle(cx, y + 3f, 5.5f * level, fillPaint)
+        for (i in 0 until min(maxPower, 7)) {
+            image(c, if (i < power / 256) CompanionArt.POW_STAR else CompanionArt.POW_EMPTY, x + i * 9f, subY + 4f)
+        }
+
+        val sec = stats.optInt("playSeconds")
+        val time = "%d:%02d:%02d".format(sec / 3600, (sec / 60) % 60, sec % 60)
+        val tw = art.width(time, 0.8f)
+        image(c, CompanionArt.TIME, cx1 - tw - 18f, subY - 1f)
+        art.text(c, cx1 - tw, subY, time, 0.8f)
+
+        // HP and FP
+        for (k in 0..1) {
+            val x0 = cx0 + k * 126f
+            val v = stats.optInt(if (k == 0) "hp" else "fp")
+            val m = stats.optInt(if (k == 0) "maxHp" else "maxFp")
+            card(c, x0, bodyY, x0 + 120f, bodyY + 30f)
+            image(c, if (k == 0) CompanionArt.HEART else CompanionArt.FLOWER, x0 + 5f, bodyY + 3f)
+            art.text(c, x0 + 23f, bodyY + 3f, if (k == 0) "HP" else "FP", 0.9f)
+            art.textRight(c, x0 + 114f, bodyY + 3f, "$v/$m", 0.9f)
+            bar(c, x0 + 6f, bodyY + 20f, 108f, 5f, v, m, if (k == 0) COL_HP else COL_FP)
+        }
+
+        // level, BP, star points, coins, star pieces
+        val icons = intArrayOf(CompanionArt.MARIO, CompanionArt.BP, CompanionArt.STAR_POINT, CompanionArt.COIN, CompanionArt.STAR_PIECE)
+        val keys = arrayOf("level", "bp", "starPoints", "coins", "starPieces")
+        for (k in 0 until 5) {
+            val x0 = cx0 + k * 50.4f
+            card(c, x0, 81f, x0 + 46f, 101f)
+            image(c, icons[k], x0 + 3f, 83f)
+            val v = stats.optInt(keys[k]).toString()
+            art.textRight(c, x0 + 42f, 84f, v, art.fit(v, 22f, 0.8f, 0.6f))
+        }
+
+        // partner and equipment
+        card(c, cx0, 106f, cx1, 202f, COL_AREA)
+        val partner = stats.optInt("partner")
+        val partners = stats.optJSONArray("partners") ?: JSONArray()
+        var partnerName = ""
+        var rank = 0
+        for (i in 0 until partners.length()) {
+            val p = partners.getJSONObject(i)
+            if (p.optInt("id") == partner) {
+                partnerName = p.optString("name")
+                rank = p.optInt("rank")
             }
         }
-        y += 18f
-
-        val playSeconds = stats.optInt("playSeconds")
-        val rows = listOf(
-            "Level" to stats.optInt("level").toString(),
-            "Star Points" to stats.optInt("starPoints").toString(),
-            "BP" to stats.optInt("bp").toString(),
-            "Coins" to stats.optInt("coins").toString(),
-            "Star Pieces" to stats.optInt("starPieces").toString(),
-            "Boots / Hammer" to "${stats.optInt("boots") + 1} / ${stats.optInt("hammer") + 1}",
-            "Play time" to "%d:%02d".format(playSeconds / 3600, (playSeconds / 60) % 60),
-        )
-        val colW = b.width() / 2f
-        rows.forEachIndexed { i, (k, v) ->
-            val x = b.left + (i % 2) * colW
-            val yy = y + (i / 2) * 15f
-            c.drawText(k, x, yy, small)
-            small.textAlign = Paint.Align.RIGHT
-            c.drawText(v, x + colW - 8f, yy, small)
-            small.textAlign = Paint.Align.LEFT
+        if (partner > 0 && icon(c, CompanionArt.PARTNER + partner, cx0 + 8f, 114f, 40f)) {
+            if (rank > 0) image(c, CompanionArt.RANK, cx0 + 40f, 142f)
         }
+        art.text(c, cx0 + 56f, 116f, if (partner > 0) partnerName else "No partner yet", 0.9f)
+        if (partner > 0) {
+            art.text(c, cx0 + 56f, 134f, when (rank) { 1 -> "Super rank"; 2 -> "Ultra rank"; else -> "Partner" }, 0.7f, alpha = 200)
+        }
+        val boots = stats.optInt("boots")
+        val hammer = stats.optInt("hammer")
+        var ex = cx0 + 10f
+        if (boots >= 0 && itemIcon(c, CompanionArt.ITEM_BOOTS + boots, ex, 162f, 28f)) ex += 34f
+        if (hammer >= 0 && itemIcon(c, CompanionArt.ITEM_HAMMER + hammer, ex, 162f, 28f)) ex += 34f
+        art.text(c, ex + 4f, 168f, "Equipment", 0.75f, alpha = 200)
     }
 
-    private fun drawMap(c: Canvas, b: RectF) {
+    // ---- Map -----------------------------------------------------------------------------
+
+    private val mapView = RectF(57f, 11f, 309f, 199f)
+
+    private fun drawMap(c: Canvas) {
         val spaces = stats.optJSONArray("spaces") ?: JSONArray()
         val current = stats.optInt("space", -1)
-        // PauseMapSpaces live on the pause menu's 320x320 world map.
-        val s = min(b.width() / 260f, (b.height() - 12f) / 200f)
-        val ox = b.left - 20f * s
-        val oy = b.top - 4f * s
-        fun px(o: JSONObject) = ox + o.optInt("x") * s
-        fun py(o: JSONObject) = oy + o.optInt("y") * s
-        strokePaint.color = COL_PANEL_EDGE
+        val v = mapView
+        if (mapFollow && current >= 0) {
+            spaces.optJSONObject(current)?.let {
+                mapX = it.optInt("x").toFloat()
+                mapY = it.optInt("y").toFloat()
+            }
+        }
+        if (mapX < 0) {
+            mapX = 160f
+            mapY = 160f
+        }
+        // keep the view inside the 320x320 map
+        mapX = mapX.coerceIn(v.width() / 2, 320f - v.width() / 2)
+        mapY = mapY.coerceIn(v.height() / 2, 320f - v.height() / 2)
+        val mx0 = mapX - v.width() / 2
+        val my0 = mapY - v.height() / 2
+
+        round(v.left - 2, v.top - 2, v.right + 2, v.bottom + 2, 6f, COL_PANEL_EDGE, c)
+        val map = art.image(CompanionArt.WORLD_MAP)
+        if (map != null) {
+            art.drawPart(c, map, mx0.toInt(), my0.toInt(), v.width().toInt(), v.height().toInt(), v)
+        } else {
+            round(v.left, v.top, v.right, v.bottom, 4f, COL_CARD, c)
+        }
+        c.save()
+        c.clipRect(v)
+        val loc = art.image(CompanionArt.MAP_LOCATION)
         for (i in 0 until spaces.length()) {
             val o = spaces.getJSONObject(i)
             if (o.optInt("visited") == 0) continue
-            val parent = spaces.optJSONObject(o.optInt("parent")) ?: continue
-            if (parent.optInt("visited") == 0) continue
-            c.drawLine(px(o), py(o), px(parent), py(parent), strokePaint)
+            val x = v.left + o.optInt("x") - mx0
+            val y = v.top + o.optInt("y") - my0
+            if (loc != null) art.drawTinted(c, loc, x - 8f, y - 8f, 1f, COL_MARKER)
+            else round(x - 3, y - 3, x + 3, y + 3, 3f, COL_MARKER, c)
+            val name = o.optString("name")
+            hits += Hit(RectF(x - 9f, y - 9f, x + 9f, y + 9f)) { mapLabel = name; invalidate() }
         }
-        val blink = (SystemClock.uptimeMillis() / 400) % 2 == 0L
-        for (i in 0 until spaces.length()) {
-            val o = spaces.getJSONObject(i)
-            val visited = o.optInt("visited") == 1
-            fillPaint.color = when {
-                i == current -> if (blink) COL_HP else COL_STAR
-                visited -> COL_FP
-                else -> COL_BAR_BACK
+        if (current >= 0) {
+            spaces.optJSONObject(current)?.let { o ->
+                val x = v.left + o.optInt("x") - mx0
+                val y = v.top + o.optInt("y") - my0
+                val walk = if ((SystemClock.uptimeMillis() / 270) % 2 == 0L) CompanionArt.MAP_WALK0 else CompanionArt.MAP_WALK1
+                if (!image(c, walk, x - 12f, y - 20f)) round(x - 4, y - 4, x + 4, y + 4, 4f, COL_HP, c)
             }
-            val r = if (i == current) 5f else 3.5f
-            c.drawCircle(px(o), py(o), r, fillPaint)
-            if (visited) {
-                val name = o.optString("name")
-                hits += Hit(RectF(px(o) - 8f, py(o) - 8f, px(o) + 8f, py(o) + 8f)) { mapLabel = name; invalidate() }
-            }
+            postInvalidateDelayed(270)
         }
-        val label = if (current >= 0 && mapLabel.isEmpty()) spaces.optJSONObject(current)?.optString("name") ?: "" else mapLabel
-        c.drawText(label, b.left, b.bottom - 2f, small)
-        if (current >= 0) postInvalidateDelayed(400)
+        c.restore()
+
+        // where Mario is (or the place tapped)
+        val label = mapLabel.ifEmpty { spaces.optJSONObject(current)?.optString("name") ?: stats.optString("location") }
+        if (label.isNotEmpty()) {
+            val cw = art.width(label, 0.85f) + 14f
+            round(v.left + 4, v.top + 4, v.left + 4 + cw, v.top + 22, 7f, COL_DARK_CHIP, c)
+            art.text(c, v.left + 10, v.top + 6, label, 0.85f, white = true)
+        }
+        if (!mapFollow) {
+            chip(c, v.right - 62f, v.bottom - 24f, v.right - 4f, v.bottom - 4f, "Centre", 0.75f)
+            hits += Hit(RectF(v.right - 62f, v.bottom - 24f, v.right - 4f, v.bottom - 4f)) {
+                mapFollow = true
+                mapLabel = ""
+                invalidate()
+            }
+        } else {
+            round(v.left + 4, v.bottom - 24, v.left + 112, v.bottom - 4, 7f, COL_DARK_CHIP, c)
+            art.text(c, v.left + 10, v.bottom - 22, "Drag to look", 0.7f, white = true)
+        }
     }
 
-    private var mapLabel = ""
+    // ---- Party ---------------------------------------------------------------------------
 
-    private fun drawParty(c: Canvas, b: RectF) {
+    private fun drawParty(c: Canvas) {
         val partners = stats.optJSONArray("partners") ?: JSONArray()
-        val curPartner = stats.optInt("partner")
-        val cols = 2
-        val rows = 4
-        val cw = b.width() / cols
-        val ch = b.height() / rows
-        for (i in 0 until min(partners.length(), cols * rows)) {
+        val cur = stats.optInt("partner")
+        var curName = ""
+        var owned = 0
+        for (i in 0 until partners.length()) {
             val p = partners.getJSONObject(i)
-            val r = RectF(
-                b.left + (i % cols) * cw + 2f, b.top + (i / cols) * ch + 2f,
-                b.left + (i % cols + 1) * cw - 2f, b.top + (i / cols + 1) * ch - 2f,
-            )
-            val owned = p.optInt("owned") == 1
-            val id = p.optInt("id")
-            fillPaint.color = when {
-                id == curPartner -> COL_SELECTED
-                owned -> COL_CARD
-                else -> COL_CARD_OFF
-            }
-            c.drawRoundRect(r, 6f, 6f, fillPaint)
-            text.color = if (owned) COL_INK else COL_INK_DIM
-            c.drawText(if (owned) p.optString("name") else "???", r.left + 6f, r.centerY() + 1f, text)
-            text.color = COL_INK
-            if (owned) {
-                val rank = p.optInt("rank")
-                val rankText = when (rank) { 1 -> "Super"; 2 -> "Ultra"; else -> "" }
-                if (rankText.isNotEmpty()) c.drawText(rankText, r.left + 6f, r.bottom - 4f, small)
-                if (id != curPartner) {
-                    hits += Hit(r) { CompanionBridge.request(CompanionBridge.REQ_PARTNER_BASE + id) }
-                }
-            }
+            if (p.optInt("owned") == 1) owned++
+            if (p.optInt("id") == cur) curName = p.optString("name")
         }
+        pageTitle(c, "Party", if (cur > 0) "$curName is with you" else "No partner yet")
+        for (i in 0 until min(partners.length(), 8)) {
+            val p = partners.getJSONObject(i)
+            val id = p.optInt("id")
+            val has = p.optInt("owned") == 1
+            val x0 = cx0 + (i % 4) * 63.5f
+            val y0 = bodyY + (i / 4) * 74f
+            val x1 = x0 + 59f
+            val y1 = y0 + 68f
+            tile(c, x0, y0, x1, y1, 8f, when { id == cur -> COL_SEL; has -> COL_PANEL; else -> COL_OFF })
+            if (!icon(c, (if (has) CompanionArt.PARTNER else CompanionArt.PARTNER_DISABLED) + id, (x0 + x1) / 2 - 18f, y0 + 6f, 36f)) {
+                round((x0 + x1) / 2 - 14f, y0 + 8f, (x0 + x1) / 2 + 14f, y0 + 38f, 6f, COL_CARD, c)
+            }
+            if (has && p.optInt("rank") > 0) image(c, CompanionArt.RANK, x1 - 18f, y0 + 30f)
+            val name = if (has) p.optString("name") else "???"
+            art.textCentered(c, (x0 + x1) / 2f, y0 + 47f, name, art.fit(name, 52f, 0.8f, 0.5f), alpha = if (has) 255 else 140)
+            if (has && id != cur) hits += Hit(RectF(x0, y0, x1, y1)) { CompanionBridge.request(CompanionBridge.REQ_PARTNER_BASE + id) }
+        }
+        if (owned > 1) art.textCentered(c, (cx0 + cx1) / 2f, 191f, "Tap a partner to switch", 0.7f, alpha = 200)
     }
 
-    /** A scrolling list of rows; returns nothing, registers taps per row. */
+    // ---- lists -------------------------------------------------------------------------------
+
+    /** A scrolling column of rows under the page title. */
     private fun drawList(
-        c: Canvas, b: RectF, header: String, count: Int, rowH: Float,
+        c: Canvas, count: Int, rowH: Float,
         row: (Canvas, Int, RectF) -> Unit, tap: ((Int) -> Unit)? = null,
     ) {
-        c.drawText(header, b.left, b.top + 9f, text)
-        val list = RectF(b.left, b.top + 14f, b.right, b.bottom)
+        val list = RectF(cx0, bodyY, cx1, 201f)
         maxScroll = max(0f, count * rowH - list.height())
         scroll = scroll.coerceIn(0f, maxScroll)
         c.save()
@@ -453,11 +570,7 @@ class CompanionView(
         val last = min(count - 1, ((scroll + list.height()) / rowH).toInt())
         for (i in first..last) {
             val top = list.top + i * rowH - scroll
-            val r = RectF(list.left, top, list.right, top + rowH)
-            if (i % 2 == 0) {
-                fillPaint.color = COL_ROW
-                c.drawRect(r, fillPaint)
-            }
+            val r = RectF(list.left, top, list.right - 6f, top + rowH - 2f)
             row(c, i, r)
             if (tap != null) {
                 val visible = RectF(r.left, max(r.top, list.top), r.right, min(r.bottom, list.bottom))
@@ -467,107 +580,136 @@ class CompanionView(
         c.restore()
         if (maxScroll > 0f) {
             val trackH = list.height()
-            val thumbH = max(12f, trackH * trackH / (count * rowH))
+            val thumbH = max(14f, trackH * trackH / (count * rowH))
             val thumbY = list.top + (trackH - thumbH) * (scroll / maxScroll)
-            fillPaint.color = COL_PANEL_EDGE
-            c.drawRoundRect(RectF(list.right - 3f, thumbY, list.right, thumbY + thumbH), 1.5f, 1.5f, fillPaint)
+            round(list.right - 3f, list.top, list.right, list.bottom, 1.5f, COL_CARD_RIM, c)
+            round(list.right - 3f, thumbY, list.right, thumbY + thumbH, 1.5f, COL_PANEL_EDGE, c)
         }
     }
 
-    private fun drawTattle(c: Canvas, b: RectF) {
+    private fun drawTattle(c: Canvas) {
         val list = pageJson.optJSONArray("list") ?: JSONArray()
-        drawList(c, b, "Tattle log  ${pageJson.optInt("known")}/${pageJson.optInt("total")}", list.length(), 13f,
-            row = { cv, i, r -> cv.drawText(list.getJSONObject(i).optString("name"), r.left + 4f, r.bottom - 3f, small) },
+        pageTitle(c, "Tattle log", "${pageJson.optInt("known")} of ${pageJson.optInt("total")} enemies")
+        if (list.length() == 0) {
+            art.textCentered(c, (cx0 + cx1) / 2f, 110f, "Goombario has tattled nothing yet.", 0.75f, alpha = 200)
+            return
+        }
+        drawList(c, list.length(), 20f,
+            row = { cv, i, r ->
+                card(cv, r.left, r.top, r.right, r.bottom)
+                val name = list.getJSONObject(i).optString("name")
+                art.text(cv, r.left + 6f, r.top + 2f, name, art.fit(name, r.width() - 12f, 0.8f, 0.55f))
+            },
             tap = { i ->
                 val o = list.getJSONObject(i)
                 tattleOpen = o.optInt("type")
                 tattleName = o.optString("name")
                 tattleText = null
+                tattlePage = 0
                 CompanionBridge.wantTattle(tattleOpen)
                 invalidate()
             })
     }
 
-    private fun drawTattleText(c: Canvas, b: RectF) {
-        c.drawText(tattleName, b.left, b.top + 9f, text)
-        val back = RectF(b.right - 40f, b.top, b.right, b.top + 12f)
-        fillPaint.color = COL_BTN
-        c.drawRoundRect(back, 4f, 4f, fillPaint)
-        small.color = Color.WHITE
-        small.textAlign = Paint.Align.CENTER
-        c.drawText("Back", back.centerX(), back.bottom - 3f, small)
-        small.textAlign = Paint.Align.LEFT
-        small.color = COL_INK
-        hits += Hit(back) { tattleOpen = -1; invalidate() }
-        val body = tattleText ?: "…"
-        var y = b.top + 26f
-        for (line in wrap(body, b.width() - 4f, small)) {
-            if (y > b.bottom) break
-            c.drawText(line, b.left + 2f, y, small)
-            y += 11f
+    private fun drawTattleText(c: Canvas) {
+        pageTitle(c, tattleName, null)
+        chip(c, cx1 - 50f, headY - 2f, cx1, headY + 18f, "Back", 0.75f)
+        hits += Hit(RectF(cx1 - 54f, headY - 6f, cx1 + 4f, headY + 22f)) { tattleOpen = -1; invalidate() }
+        card(c, cx0, bodyY - 14f, cx1, 202f, COL_AREA)
+        val body = tattleText ?: "..."
+        val scale = 0.72f
+        val lines = art.wrap(body, cx1 - cx0 - 14f, scale)
+        val perPage = 12
+        val pages = max(1, (lines.size + perPage - 1) / perPage)
+        tattlePage = tattlePage.coerceIn(0, pages - 1)
+        var y = bodyY - 10f
+        for (line in lines.drop(tattlePage * perPage).take(perPage)) {
+            art.text(c, cx0 + 7f, y, line, scale)
+            y += 13f
+        }
+        if (pages > 1) {
+            chip(c, cx1 - 50f, 182f, cx1 - 6f, 199f, "${tattlePage + 1}/$pages", 0.6f)
+            hits += Hit(RectF(cx1 - 50f, 180f, cx1 - 6f, 201f)) { tattlePage = (tattlePage + 1) % pages; invalidate() }
         }
     }
 
-    private fun drawRecipes(c: Canvas, b: RectF) {
+    private fun drawRecipes(c: Canvas) {
         val list = pageJson.optJSONArray("list") ?: JSONArray()
-        drawList(c, b, "Recipes  ${pageJson.optInt("cooked")}/${pageJson.optInt("total")}", list.length(), 13f,
-            row = { cv, i, r ->
-                val o = list.getJSONObject(i)
-                val done = o.optInt("done") == 1
-                small.color = if (done) COL_INK else COL_INK_DIM
-                cv.drawText(if (done) o.optString("name") else "? ? ?", r.left + 14f, r.bottom - 3f, small)
-                small.color = COL_INK
-                if (done) cv.drawText("✓", r.left + 3f, r.bottom - 3f, small)
-            })
+        pageTitle(c, "Recipes", "${pageJson.optInt("cooked")} of ${pageJson.optInt("total")} dishes cooked")
+        drawList(c, list.length(), 22f, row = { cv, i, r ->
+            val o = list.getJSONObject(i)
+            val done = o.optInt("done") == 1
+            card(cv, r.left, r.top, r.right, r.bottom, if (done) COL_CARD else COL_OFF)
+            itemIcon(cv, o.optInt("item"), r.left + 3f, r.top + 1f, 18f, dim = !done, alpha = if (done) 255 else 110)
+            val name = if (done) o.optString("name") else "???"
+            art.text(cv, r.left + 25f, r.top + 3f, name, art.fit(name, r.width() - 30f, 0.8f, 0.55f), alpha = if (done) 255 else 140)
+        })
     }
 
-    private fun drawBadges(c: Canvas, b: RectF) {
+    private fun drawBadges(c: Canvas) {
         val list = pageJson.optJSONArray("list") ?: JSONArray()
-        drawList(c, b, "Badges  BP ${pageJson.optInt("bpUsed")}/${pageJson.optInt("bpMax")}", list.length(), 13f,
-            row = { cv, i, r ->
-                val o = list.getJSONObject(i)
-                if (o.optInt("on") == 1) {
-                    fillPaint.color = COL_SELECTED
-                    cv.drawRect(r, fillPaint)
-                }
-                cv.drawText(o.optString("name"), r.left + 4f, r.bottom - 3f, small)
-                small.textAlign = Paint.Align.RIGHT
-                cv.drawText("${o.optInt("bp")} BP", r.right - 6f, r.bottom - 3f, small)
-                small.textAlign = Paint.Align.LEFT
-            })
+        pageTitle(c, "Badges", "BP ${pageJson.optInt("bpUsed")} of ${pageJson.optInt("bpMax")} used")
+        if (list.length() == 0) {
+            art.textCentered(c, (cx0 + cx1) / 2f, 110f, "No badges yet.", 0.75f, alpha = 200)
+            return
+        }
+        drawList(c, list.length(), 22f, row = { cv, i, r ->
+            val o = list.getJSONObject(i)
+            val on = o.optInt("on") == 1
+            card(cv, r.left, r.top, r.right, r.bottom, if (on) COL_SEL else COL_CARD)
+            itemIcon(cv, o.optInt("item"), r.left + 3f, r.top + 1f, 18f)
+            val bp = "${o.optInt("bp")}"
+            val bw = art.width(bp, 0.75f)
+            image(cv, CompanionArt.BP, r.right - bw - 22f, r.top + 2f)
+            art.textRight(cv, r.right - 4f, r.top + 3f, bp, 0.75f)
+            val name = o.optString("name")
+            art.text(cv, r.left + 25f, r.top + 3f, name, art.fit(name, r.width() - 56f - bw, 0.8f, 0.5f))
+        })
     }
 
-    private fun drawItems(c: Canvas, b: RectF) {
-        val rows = ArrayList<Pair<String, Boolean>>()
+    private fun drawItems(c: Canvas) {
+        data class Row(val title: String?, val item: Int, val name: String)
+        val rows = ArrayList<Row>()
         fun add(title: String, key: String) {
             val a = pageJson.optJSONArray(key) ?: return
-            rows += title to true
-            for (i in 0 until a.length()) rows += a.getJSONObject(i).optString("name") to false
+            if (a.length() == 0) return
+            rows += Row(title, 0, "")
+            for (i in 0 until a.length()) {
+                val o = a.getJSONObject(i)
+                rows += Row(null, o.optInt("item"), o.optString("name"))
+            }
         }
         add("Items", "items")
         add("Key items", "keyItems")
         add("Stored", "stored")
-        drawList(c, b, "Inventory", rows.size, 13f,
-            row = { cv, i, r ->
-                val (name, header) = rows[i]
-                cv.drawText(name, r.left + (if (header) 2f else 10f), r.bottom - 3f, if (header) text else small)
-            })
+        pageTitle(c, "Items", null)
+        if (rows.isEmpty()) {
+            art.textCentered(c, (cx0 + cx1) / 2f, 110f, "Mario carries nothing yet.", 0.75f, alpha = 200)
+            return
+        }
+        drawList(c, rows.size, 22f, row = { cv, i, r ->
+            val row = rows[i]
+            if (row.title != null) {
+                art.text(cv, r.left + 2f, r.top + 3f, row.title, 0.85f)
+            } else {
+                card(cv, r.left + 6f, r.top, r.right, r.bottom)
+                itemIcon(cv, row.item, r.left + 9f, r.top + 1f, 18f)
+                art.text(cv, r.left + 31f, r.top + 3f, row.name, art.fit(row.name, r.width() - 36f, 0.8f, 0.55f))
+            }
+        })
     }
 
+    // ---- Options -------------------------------------------------------------------------
+
     private fun drawOptions(c: Canvas) {
-        val b = RectF(panel.left + 6f, panel.top + 4f, panel.right - 6f, panel.bottom - 4f)
-        c.drawText("Dual screen", b.left, b.top + 10f, text)
-        var y = b.top + 18f
+        pageTitle(c, "Options", "Dual screen")
+        var y = bodyY
         fun option(label: String, value: String, onTap: () -> Unit) {
-            val r = RectF(b.left, y, b.right, y + 24f)
-            fillPaint.color = COL_CARD
-            c.drawRoundRect(r, 5f, 5f, fillPaint)
-            c.drawText(label, r.left + 6f, r.centerY() + 3f, small)
-            text.textAlign = Paint.Align.RIGHT
-            c.drawText(value, r.right - 6f, r.centerY() + 4f, text)
-            text.textAlign = Paint.Align.LEFT
-            hits += Hit(r) { onTap(); onOptionsChanged(); invalidate() }
-            y += 28f
+            tile(c, cx0, y, cx1 - 2f, y + 30f, 7f, COL_PANEL)
+            art.text(c, cx0 + 8f, y + 8f, label, 0.8f)
+            art.textRight(c, cx1 - 10f, y + 8f, value, art.fit(value, 130f, 0.8f, 0.5f), alpha = 210)
+            hits += Hit(RectF(cx0, y, cx1, y + 30f)) { onTap(); onOptionsChanged(); invalidate() }
+            y += 36f
         }
         option("Screens", settings.mode.label) {
             val all = CompanionSettings.Mode.entries
@@ -577,36 +719,19 @@ class CompanionView(
             val all = CompanionSettings.Orientation.entries
             settings.orientation = all[(settings.orientation.ordinal + 1) % all.size]
         }
-        option("Size", if (settings.original3ds) "3DS (400x240 + 320x240)" else "Large game screen") {
+        option("Size", if (settings.original3ds) "3DS size" else "Large game") {
             settings.original3ds = !settings.original3ds
         }
-        option("Bottom screen side", if (settings.swapSides) "Left" else "Right") {
+        option("Menu side", if (settings.swapSides) "Left" else "Right") {
             settings.swapSides = !settings.swapSides
         }
-        small.color = COL_INK_DIM
-        c.drawText("Layout after Star Haven's 3DS bottom screen.", b.left, b.bottom - 4f, small)
-        small.color = COL_INK
+        art.text(c, cx0 + 2f, 190f, "Layout after Star Haven's 3DS screen.", 0.6f, alpha = 170)
     }
 
-    private fun wrap(s: String, width: Float, p: Paint): List<String> {
-        val out = ArrayList<String>()
-        var line = StringBuilder()
-        for (word in s.split(' ')) {
-            val candidate = if (line.isEmpty()) word else "$line $word"
-            if (p.measureText(candidate) > width && line.isNotEmpty()) {
-                out += line.toString()
-                line = StringBuilder(word)
-            } else {
-                line = StringBuilder(candidate)
-            }
-        }
-        if (line.isNotEmpty()) out += line.toString()
-        return out
-    }
-
-    // ---- touch ---------------------------------------------------------------------
+    // ---- touch ------------------------------------------------------------------------------
     private var downX = 0f
     private var downY = 0f
+    private var lastX = 0f
     private var lastY = 0f
     private var dragging = false
 
@@ -618,20 +743,29 @@ class CompanionView(
             MotionEvent.ACTION_DOWN -> {
                 downX = gx
                 downY = gy
+                lastX = gx
                 lastY = gy
                 dragging = false
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!dragging && abs(gy - downY) > DRAG_SLOP) dragging = true
-                if (dragging && maxScroll > 0f) {
-                    scroll = (scroll - (gy - lastY)).coerceIn(0f, maxScroll)
-                    invalidate()
+                if (!dragging && (abs(gy - downY) > DRAG_SLOP || abs(gx - downX) > DRAG_SLOP)) dragging = true
+                if (dragging) {
+                    if (tab == Tab.MAP && mapView.contains(downX, downY)) {
+                        mapFollow = false
+                        mapX -= gx - lastX
+                        mapY -= gy - lastY
+                        invalidate()
+                    } else if (maxScroll > 0f) {
+                        scroll = (scroll - (gy - lastY)).coerceIn(0f, maxScroll)
+                        invalidate()
+                    }
                 }
+                lastX = gx
                 lastY = gy
             }
             MotionEvent.ACTION_UP -> {
                 if (!dragging) {
-                    // Last drawn hits win: rows draw over the panel.
+                    // Last drawn hits win: the rail and buttons draw over the page.
                     hits.lastOrNull { it.rect.contains(downX, downY) }?.let {
                         performClick()
                         it.action()
@@ -652,6 +786,7 @@ class CompanionView(
         const val POLL_FAST_MS = 100L
         const val DRAG_SLOP = 6f
 
+        // Star Haven's palette (bottom_screen.c)
         val COL_BG_TOP = Color.rgb(250, 196, 110)
         val COL_BG_BOTTOM = Color.rgb(222, 130, 60)
         val COL_PANEL = Color.rgb(255, 247, 222)
@@ -660,15 +795,15 @@ class CompanionView(
         val COL_TAB = Color.rgb(205, 160, 105)
         val COL_HP = Color.rgb(232, 56, 48)
         val COL_FP = Color.rgb(64, 176, 232)
-        val COL_STAR = Color.rgb(250, 210, 60)
         val COL_BAR_BACK = Color.rgb(150, 120, 90)
         val COL_BTN = Color.argb(230, 116, 72, 40)
-        val COL_BTN_OFF = Color.argb(120, 116, 72, 40)
-        val COL_INK = Color.rgb(60, 36, 20)
-        val COL_INK_DIM = Color.rgb(160, 130, 100)
-        val COL_CARD = Color.rgb(245, 225, 185)
-        val COL_CARD_OFF = Color.rgb(225, 210, 185)
-        val COL_SELECTED = Color.rgb(255, 225, 120)
-        val COL_ROW = Color.argb(40, 116, 72, 40)
+        val COL_BTN_OFF = Color.argb(110, 116, 72, 40)
+        val COL_CARD = Color.rgb(250, 236, 204)
+        val COL_CARD_RIM = Color.rgb(200, 160, 110)
+        val COL_AREA = Color.rgb(255, 242, 214)
+        val COL_SEL = Color.rgb(255, 214, 120)
+        val COL_OFF = Color.rgb(200, 185, 165)
+        val COL_DARK_CHIP = Color.argb(200, 60, 36, 20)
+        val COL_MARKER = Color.rgb(220, 80, 30)
     }
 }

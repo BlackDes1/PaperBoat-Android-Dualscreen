@@ -292,6 +292,11 @@ static const char* const kCharsetUtf8[248] = {
     "　", /* 0xF7 */
 };
 
+const char* companion_charset(int code) {
+    return code >= 0 && code < (int) ARRAY_COUNT(kCharsetUtf8) ? kCharsetUtf8[code] : NULL;
+}
+
+
 /* arguments after MSG_CHAR_READ_FUNCTION f, -1 if unknown (as Star Haven's touch_menu.c) */
 static const s8 sFuncArgs[0x30] = {
     1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 2, 0, 2,   /* 00 font .. 0F speed */
