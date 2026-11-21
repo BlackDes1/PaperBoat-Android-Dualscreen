@@ -129,6 +129,11 @@ std::string BasePath(const char* path) {
 }
 
 bool AltAssetsOn() {
+    // the bottom screen can ask before the engine (and its CVars) is up
+    auto ctx = Ship::Context::GetRawInstance();
+    if (ctx == nullptr || ctx->GetConsoleVariables() == nullptr) {
+        return false;
+    }
     return CVarGetInteger("gEnhancements.Mods.AlternateAssets", 0) != 0;
 }
 
