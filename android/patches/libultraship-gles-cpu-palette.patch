@@ -1,0 +1,14 @@
+--- a/src/fast/interpreter.cpp
++++ b/src/fast/interpreter.cpp
+@@ -3753,6 +3753,11 @@
+         } else if (mRdp->palettes[0] == nullptr || mRdp->palettes[1] == nullptr) {
+             continue;
+         }
++#ifdef USE_OPENGLES
++        // PaperBoat Android: the shader-side palette lookup renders CI textures as
++        // noise on Adreno (GLES 3.2); decode them on the CPU like the other fallbacks.
++        continue;
++#endif
+         palettized[i] = true;
+         cc_options |= i == 0 ? SHADER_OPT(TEXEL0_PALETTE) : SHADER_OPT(TEXEL1_PALETTE);
+     }

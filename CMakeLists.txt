@@ -220,6 +220,33 @@ endif()
 # Add libultraship BEFORE setting include directories to avoid polluting its builds.
 # Into the binary tree, not the submodule: Android configures once per ABI, and
 # an in-source build dir has them all overwriting the same libImGui.a.
+# Android-only fixes to libultraship, kept as patches beside the Android app
+# (android/patches) rather than in the submodule, so a submodule bump shows
+# at once whether they still apply. Idempotent; the lock keeps :app and
+# :palcore, which configure in parallel, from applying one twice.
+if(ANDROID)
+    find_package(Git REQUIRED)
+    file(GLOB PAPERBOAT_LUS_PATCHES "${CMAKE_SOURCE_DIR}/android/patches/libultraship-*.patch")
+    file(LOCK "${CMAKE_SOURCE_DIR}/external/libultraship.patch-lock" GUARD PROCESS TIMEOUT 120)
+    foreach(PAPERBOAT_PATCH ${PAPERBOAT_LUS_PATCHES})
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" apply --reverse --check "${PAPERBOAT_PATCH}"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/external/libultraship"
+            RESULT_VARIABLE PAPERBOAT_PATCH_PRESENT OUTPUT_QUIET ERROR_QUIET)
+        if(NOT PAPERBOAT_PATCH_PRESENT EQUAL 0)
+            execute_process(
+                COMMAND "${GIT_EXECUTABLE}" apply "${PAPERBOAT_PATCH}"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/external/libultraship"
+                RESULT_VARIABLE PAPERBOAT_PATCH_RESULT ERROR_VARIABLE PAPERBOAT_PATCH_ERROR)
+            if(NOT PAPERBOAT_PATCH_RESULT EQUAL 0)
+                message(FATAL_ERROR "Could not apply ${PAPERBOAT_PATCH}: ${PAPERBOAT_PATCH_ERROR}")
+            endif()
+            message(STATUS "Applied ${PAPERBOAT_PATCH}")
+        endif()
+    endforeach()
+    file(LOCK "${CMAKE_SOURCE_DIR}/external/libultraship.patch-lock" RELEASE)
+endif()
+
 add_subdirectory(external/libultraship ${CMAKE_BINARY_DIR}/libultraship)
 
 # Prism (fetched by libultraship) misdetects clang-cl as non-MSVC and skips /EHsc
