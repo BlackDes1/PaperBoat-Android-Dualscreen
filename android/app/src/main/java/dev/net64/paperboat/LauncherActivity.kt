@@ -15,20 +15,25 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import dev.net64.paperboat.GameAssets.Region
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.concurrent.thread
 
 /**
  * First-run flow: unpack the bundled files, take a ROM from the user, and turn
- * it into pm64.o2r before handing off to the game. Nothing about the game ships
+ * it into its region's archive (pm64.o2r for the US game, pm64-pal.o2r for the
+ * European one) before handing off to the game. Nothing about the game ships
  * in the APK; the ROM stays on the device and the extraction runs here.
+ *
+ * With both regions extracted, the launcher asks which one to play.
  */
 class LauncherActivity : ComponentActivity() {
 
     private lateinit var status: TextView
     private lateinit var chooseButton: Button
     private lateinit var progress: ProgressBar
+    private lateinit var regionButtons: LinearLayout
 
     private val pickRom =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -59,12 +64,40 @@ class LauncherActivity : ComponentActivity() {
                         setBusy(false, stagingError)
                         chooseButton.isEnabled = false
                     }
-                    GameAssets.isExtracted(this) -> startGame()
-                    GameAssets.romFile(this).isFile -> extractRom()
-                    else -> setBusy(false, romInstructions)
+                    else -> chooseNextStep()
                 }
             }
         }
+    }
+
+    /** Start a game, extract a ROM already imported, or ask for one. */
+    private fun chooseNextStep() {
+        val playable = Region.entries.filter { GameAssets.isBuilt(this, it) && GameAssets.isExtracted(this, it) }
+        val pending = Region.entries.firstOrNull {
+            GameAssets.isBuilt(this, it) && !GameAssets.isExtracted(this, it) && GameAssets.romFile(this, it).isFile
+        }
+        val requested = intent.getStringExtra(EXTRA_EXTRACT)?.let { n -> Region.entries.firstOrNull { it.name == n } }
+        when {
+            requested != null && GameAssets.romFile(this, requested).isFile -> extractRom(requested)
+            pending != null -> extractRom(pending)
+            playable.size == 1 -> startGame(playable[0])
+            playable.size > 1 -> showRegionChoice(playable)
+            else -> setBusy(false, romInstructions)
+        }
+    }
+
+    /** Both games are ready: one button each, the last one played first. */
+    private fun showRegionChoice(regions: List<Region>) {
+        val last = GameAssets.activeRegion(this)
+        setBusy(false, "Which Paper Mario do you want to play?\n\nOr choose another ROM to add or replace one.")
+        regionButtons.removeAllViews()
+        for (region in regions.sortedBy { if (it == last) 0 else 1 }) {
+            regionButtons.addView(Button(this).apply {
+                text = "Play Paper Mario (${region.label})"
+                setOnClickListener { startGame(region) }
+            })
+        }
+        regionButtons.visibility = View.VISIBLE
     }
 
     private fun buildUi() {
@@ -86,6 +119,10 @@ class LauncherActivity : ComponentActivity() {
             setOnClickListener { pickRom.launch(arrayOf("*/*")) }
         }
         progress = ProgressBar(this).apply { visibility = View.GONE }
+        regionButtons = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
 
         // Failure messages run long and the launcher is landscape-only, so let
         // the text scroll rather than push the button off-screen.
@@ -97,6 +134,7 @@ class LauncherActivity : ComponentActivity() {
         }
 
         root.addView(scroller, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(regionButtons)
         root.addView(chooseButton)
         root.addView(progress)
         setContentView(root)
@@ -113,8 +151,7 @@ class LauncherActivity : ComponentActivity() {
 
         thread(name = "pm64-rom-import") {
             val result = runCatching {
-                val target = GameAssets.romFile(this)
-                val partial = File(target.parentFile, "${GameAssets.ROM_NAME}.part")
+                val partial = File(GameAssets.gameDir(this), "rom-import.part")
                 partial.delete()
 
                 contentResolver.openInputStream(uri).use { input ->
@@ -125,22 +162,33 @@ class LauncherActivity : ComponentActivity() {
                     }
                 }
 
-                val version = GameAssets.identifyRom(this, partial)
-                if (version == null) {
+                val region = GameAssets.identifyRom(this, partial)
+                if (region == null) {
                     partial.delete()
-                    error("That is not a Paper Mario ROM the bundled recipes know how to extract.")
+                    error(
+                        "That is not a Paper Mario ROM the bundled recipes know how to extract. " +
+                            "Supported: the US release and the European release (English, German, " +
+                            "French, Spanish), as a .z64 dump. The file name does not matter."
+                    )
+                }
+                if (!GameAssets.isBuilt(this, region)) {
+                    partial.delete()
+                    error("This build of Paperboat leaves out the ${region.label} game (built without :palcore).")
                 }
 
+                val target = GameAssets.romFile(this, region)
                 if (target.exists() && !target.delete()) {
                     error("Could not replace the previous ROM.")
                 }
                 check(partial.renameTo(target)) { "Could not store the ROM in the app's files directory." }
-                version
+                // A new ROM of the region replaces its archive.
+                GameAssets.gameArchive(this, region).delete()
+                region
             }
 
             runOnUiThread {
                 result.fold(
-                    onSuccess = { extractRom() },
+                    onSuccess = { extractRom(it) },
                     onFailure = {
                         setBusy(false, "${it.message ?: it}\n\n$romInstructions")
                     }
@@ -149,15 +197,23 @@ class LauncherActivity : ComponentActivity() {
         }
     }
 
-    private fun extractRom() {
-        setBusy(true, getString(R.string.launcher_extracting))
+    private fun extractRom(region: Region) {
+        if (!GameAssets.loadNative(region)) {
+            // The other region's library is loaded and both export the same
+            // JNI names: start over in a fresh process to extract this one.
+            startActivity(Intent(this, LauncherActivity::class.java).putExtra(EXTRA_EXTRACT, region.name))
+            finish()
+            Runtime.getRuntime().exit(0)
+            return
+        }
+        setBusy(true, getString(R.string.launcher_extracting) + "\n\n(${region.label})")
 
         thread(name = "pm64-extract") {
-            val error = GameAssets.generateGameArchive(this)
+            val error = GameAssets.generateGameArchive(this, region)
 
             runOnUiThread {
                 if (error == null) {
-                    startGame()
+                    startGame(region)
                 } else {
                     setBusy(false, "$error\n\n$romInstructions")
                 }
@@ -172,6 +228,7 @@ class LauncherActivity : ComponentActivity() {
     private fun setBusy(busy: Boolean, message: String) {
         status.text = message
         chooseButton.isEnabled = !busy
+        if (busy) regionButtons.visibility = View.GONE
         progress.visibility = if (busy) View.VISIBLE else View.GONE
         if (busy) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -180,7 +237,9 @@ class LauncherActivity : ComponentActivity() {
         }
     }
 
-    private fun startGame() {
+    private fun startGame(region: Region) {
+        GameAssets.setActiveRegion(this, region)
+        GameAssets.stopGameRunningOtherThan(this, region)
         startActivity(Intent(this, MainActivity::class.java))
         finish()
 
@@ -194,12 +253,13 @@ class LauncherActivity : ComponentActivity() {
 
     /** Spelled out from the real path so debug builds don't point at the release one. */
     private val romInstructions: String
-        get() = "Select your own Paper Mario (N64) .z64 ROM. It is verified, kept in this app's " +
+        get() = "Select your own Paper Mario (N64) .z64 ROM, US or European. It is verified, kept in this app's " +
             "private storage and converted into the game's asset archive on this device — no " +
             "game data ships with the app.\n\n" +
             "Mods go in ${GameAssets.modsDir(this)}."
 
     private companion object {
         const val COPY_BUFFER_BYTES = 1 shl 17
+        const val EXTRA_EXTRACT = "extract"
     }
 }

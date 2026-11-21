@@ -34,7 +34,8 @@ object SaveStore {
     }
 
     fun savesDir(context: Context): File =
-        File(GameAssets.gameDir(context), "saves").also { it.mkdirs() }
+        // Each region keeps its own saves (PAPERBOAT_SAVE_DIR in CMakeLists.txt).
+        File(GameAssets.gameDir(context), GameAssets.activeRegion(context).savesDir).also { it.mkdirs() }
 
     fun list(context: Context): List<Save> =
         (savesDir(context).listFiles() ?: emptyArray())

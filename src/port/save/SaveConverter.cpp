@@ -17,6 +17,10 @@
 #include "dx/config.h"
 #include "dx/versioning.h"
 
+#ifndef PAPERBOAT_SAVE_DIR
+#define PAPERBOAT_SAVE_DIR "saves/"
+#endif
+
 extern "C" {
 void ver_deserialize_vanilla_save(SaveData* save);
 }
@@ -140,7 +144,7 @@ namespace {
         if (json.empty()) {
             return false;
         }
-        const std::string dir = Ship::Context::GetPathRelativeToAppDirectory("saves/", "pm64");
+        const std::string dir = Ship::Context::GetPathRelativeToAppDirectory(PAPERBOAT_SAVE_DIR, "pm64");
         std::error_code ec;
         if (!fs::exists(dir)) {
             fs::create_directories(dir, ec);

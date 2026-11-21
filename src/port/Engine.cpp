@@ -125,7 +125,10 @@ extern volatile uint32_t nuGfxTaskSpool;
 }
 
 static bool portArchiveExists = false;
-static const std::vector<std::string> sRomArchives = { "pm64.o2r" };
+#ifndef PAPERBOAT_GAME_ARCHIVE
+#define PAPERBOAT_GAME_ARCHIVE "pm64.o2r"
+#endif
+static const std::vector<std::string> sRomArchives = { PAPERBOAT_GAME_ARCHIVE };
 
 typedef enum ExtractSteps {
     ES_PORT_ARCHIVE,
@@ -648,7 +651,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                     }
                     case PS_WEB_UPLOAD: {
                         // Blocks (ASYNCIFY) until the user picks a file or cancels.
-                        const std::string dest = Ship::Context::GetPathRelativeToAppDirectory("pm64.o2r");
+                        const std::string dest = Ship::Context::GetPathRelativeToAppDirectory(PAPERBOAT_GAME_ARCHIVE);
                         if (WebFilePicker_PickInto(".o2r", dest.c_str())) {
                             extractStep = ES_VERIFY;
                         } else {
@@ -740,7 +743,7 @@ void GameEngine::RunExtract(int argc, char* argv[]) {
                 args.erase(args.begin());
                 extract = GameExtractor();
                 if (extract.RunStandalone(file)) {
-                    std::string archive = "pm64.o2r";
+                    std::string archive = PAPERBOAT_GAME_ARCHIVE;
                     if (std::filesystem::exists(Ship::Context::GetAppDirectoryPath("boat") + "/" + archive)) {
                         std::string msg = "Archive for current ROM, " + archive + ", already exists.\nExtract again?";
                         PaperboatGui::RegisterPopup("Confirm Re-extract", msg.c_str(), "Yes", "No", [&]() {

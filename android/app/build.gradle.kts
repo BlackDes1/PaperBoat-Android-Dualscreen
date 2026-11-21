@@ -229,6 +229,13 @@ android {
     lint {
         abortOnError = false
     }
+
+    packaging {
+        jniLibs {
+            // :palcore builds the same SDL2 and C++ runtime as this module.
+            pickFirsts += listOf("**/libSDL2.so", "**/libc++_shared.so")
+        }
+    }
 }
 
 kotlin {
@@ -238,6 +245,9 @@ kotlin {
 }
 
 dependencies {
+    if (findProject(":palcore") != null) {
+        implementation(project(":palcore"))
+    }
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-ktx:1.9.3")
 }

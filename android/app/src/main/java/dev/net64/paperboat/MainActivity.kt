@@ -43,12 +43,14 @@ class MainActivity : SDLActivity() {
     // org/libsdl/app stays byte-identical to the SDL release libultraship
     // pins — SDLActivity refuses to start if the two disagree on version — so
     // the library is named here rather than patched in there.
-    override fun getLibraries(): Array<String> = arrayOf("SDL2", "main")
+    // The region the launcher started: libmain.so (US) or libmain_pal.so (PAL).
+    override fun getLibraries(): Array<String> = arrayOf("SDL2", GameAssets.activeRegion(this).library)
 
     private external fun isMenuOpen(): Boolean
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        GameAssets.markRunning(this, GameAssets.activeRegion(this))
         goFullscreen()
         dualScreen = DualScreenController(this).also { it.attach() }
         addModsButton()

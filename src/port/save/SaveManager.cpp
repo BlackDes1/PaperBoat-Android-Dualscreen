@@ -11,6 +11,10 @@
 extern "C" {
 #include "dx/versioning.h"
 
+#ifndef PAPERBOAT_SAVE_DIR
+#define PAPERBOAT_SAVE_DIR "saves/"
+#endif
+
 extern SaveData gCurrentSaveFile;
 extern char MagicSaveString[];
 s32 fio_calc_globals_checksum(void);
@@ -471,7 +475,7 @@ ordered_json ConvertSaveData_to_JSON(SaveData* saveData) {
 }
 
 static std::string GlobalsPath() {
-    return Ship::Context::GetPathRelativeToAppDirectory("saves/globals.json", "pm64");
+    return Ship::Context::GetPathRelativeToAppDirectory(PAPERBOAT_SAVE_DIR "globals.json", "pm64");
 }
 
 static void StampGlobals(SaveGlobals* globals) {
@@ -488,7 +492,7 @@ static void WriteGlobals(const SaveGlobals* globals) {
     j["lastFileSelected"] = globals->lastFileSelected;
     j["language"] = globals->language;
 
-    std::string dir = Ship::Context::GetPathRelativeToAppDirectory("saves/", "pm64");
+    std::string dir = Ship::Context::GetPathRelativeToAppDirectory(PAPERBOAT_SAVE_DIR, "pm64");
     if (!fs::exists(dir)) {
         fs::create_directories(dir);
     }
@@ -534,7 +538,7 @@ void SaveManager_Init() {
 
         if (!jsonSaveFile.empty()) {
             std::string fileName = fmt::format("file{}.json", saveData->saveSlot);
-            std::string filePath = Ship::Context::GetPathRelativeToAppDirectory("saves/", "pm64");
+            std::string filePath = Ship::Context::GetPathRelativeToAppDirectory(PAPERBOAT_SAVE_DIR, "pm64");
 
             if (!fs::exists(filePath)) {
                 fs::create_directories(filePath);
@@ -556,7 +560,7 @@ void SaveManager_Init() {
         event->Cancelled = true;
 
         std::string fileName = fmt::format("file{}.json", ev->saveSlot);
-        std::string filePath = Ship::Context::GetPathRelativeToAppDirectory("saves/" + fileName, "pm64");
+        std::string filePath = Ship::Context::GetPathRelativeToAppDirectory(std::string(PAPERBOAT_SAVE_DIR) + fileName, "pm64");
 
         if (fs::exists(filePath)) {
             std::ifstream inputFile(filePath);
@@ -576,7 +580,7 @@ void SaveManager_Init() {
         event->Cancelled = true;
 
         std::string fileName = fmt::format("file{}.json", ev->saveSlot);
-        std::string filePath = Ship::Context::GetPathRelativeToAppDirectory("saves/" + fileName, "pm64");
+        std::string filePath = Ship::Context::GetPathRelativeToAppDirectory(std::string(PAPERBOAT_SAVE_DIR) + fileName, "pm64");
 
         if (fs::exists(filePath)) {
             fs::remove(filePath);

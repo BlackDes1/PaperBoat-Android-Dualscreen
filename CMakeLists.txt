@@ -277,6 +277,19 @@ else()
 endif()
 message(STATUS "Paper Mario region: ${PAPERBOAT_REGION}")
 
+# Both regions can live side by side in one app directory (Android ships
+# both): each has its own game archive, and on Android its own saves.
+if(PAPERBOAT_REGION STREQUAL "pal")
+    set(PAPERBOAT_GAME_ARCHIVE "pm64-pal.o2r")
+else()
+    set(PAPERBOAT_GAME_ARCHIVE "pm64.o2r")
+endif()
+if(ANDROID AND PAPERBOAT_REGION STREQUAL "pal")
+    set(PAPERBOAT_SAVE_DIR "saves_pal/")
+else()
+    set(PAPERBOAT_SAVE_DIR "saves/")
+endif()
+
 if(PAPERBOAT_REGION STREQUAL "us")
     # Exclude region-specific files (for building VERSION_US)
     list(FILTER GAME_SOURCES EXCLUDE REGEX "/[^/]*_(jp|fr|es|de|en|en_de|pal|ique)\\.c$")
@@ -378,7 +391,13 @@ elseif(ANDROID)
         ${GAME_SOURCES}
         ${PORT_SOURCES}
     )
-    set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "main")
+    # The PAL game is a second library in the same APK (android/palcore):
+    # MainActivity loads whichever region the player's ROM is.
+    if(PAPERBOAT_REGION STREQUAL "pal")
+        set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "main_pal")
+    else()
+        set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "main")
+    endif()
 else()
     add_executable(${PROJECT_NAME}
         ${GAME_SOURCES}
@@ -434,6 +453,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     VERSION=${PAPERBOAT_REGION}
     ${PAPERBOAT_VERSION_DEF}
     PAPERBOAT_EXPECTED_ROM="${PAPERBOAT_EXPECTED_ROM}"
+    PAPERBOAT_GAME_ARCHIVE="${PAPERBOAT_GAME_ARCHIVE}"
+    PAPERBOAT_SAVE_DIR="${PAPERBOAT_SAVE_DIR}"
     PAPERBOAT_REGION_LABEL="${PAPERBOAT_REGION_LABEL}"
     F3DEX_GBI_2
     __CTX__

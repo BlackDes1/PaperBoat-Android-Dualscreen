@@ -26,7 +26,10 @@
 namespace {
 
 constexpr const char* kLogTag = "Paperboat";
-constexpr const char* kGameArchive = "pm64.o2r";
+#ifndef PAPERBOAT_GAME_ARCHIVE
+#define PAPERBOAT_GAME_ARCHIVE "pm64.o2r"
+#endif
+constexpr const char* kGameArchive = PAPERBOAT_GAME_ARCHIVE;
 
 std::string ToStdString(JNIEnv* env, jstring value) {
     if (value == nullptr) {

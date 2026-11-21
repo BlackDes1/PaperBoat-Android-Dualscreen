@@ -25,6 +25,6 @@
     sort: OFFSET
     logging: WARN
     output:
-      binary: pm64.o2r
+      binary: pm64-pal.o2r
       headers: include
       code: code
