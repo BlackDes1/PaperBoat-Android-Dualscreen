@@ -13,10 +13,38 @@
 
 #include "port/os/OS.h"
 
-#if defined(__linux__) && !defined(__ANDROID__) // Bionic has no backtrace()
+#if defined(__linux__) // Android: backtrace() below, from the unwinder
 #include <csignal>
 #include <dlfcn.h>
+#if defined(__ANDROID__)
+#include <unwind.h>
+namespace {
+// Bionic has no backtrace() before API 33; the unwinder gives the same frames.
+struct UnwindState {
+    void** frames;
+    int max;
+    int n;
+};
+_Unwind_Reason_Code UnwindStep(struct _Unwind_Context* ctx, void* arg) {
+    auto* st = static_cast<UnwindState*>(arg);
+    const uintptr_t pc = _Unwind_GetIP(ctx);
+    if (pc != 0) {
+        if (st->n >= st->max) {
+            return _URC_END_OF_STACK;
+        }
+        st->frames[st->n++] = reinterpret_cast<void*>(pc);
+    }
+    return _URC_NO_REASON;
+}
+int backtrace(void** frames, int max) {
+    UnwindState st { frames, max, 0 };
+    _Unwind_Backtrace(UnwindStep, &st);
+    return st.n;
+}
+} // namespace
+#else
 #include <execinfo.h>
+#endif
 #include <pthread.h>
 #include <ucontext.h>
 #include <cstdio>
@@ -127,7 +155,7 @@ const std::string& ProjectSourceRoot() {
     return root;
 }
 
-#if defined(__linux__) && !defined(__ANDROID__) // Bionic has no backtrace()
+#if defined(__linux__)
 // Linux has no way to suspend and walk another thread, so the watcher signals
 // it and the handler records its own backtrace.
 void* sLinuxFrames[48];
@@ -327,7 +355,7 @@ std::string CaptureStalledStack(int threadIdx) {
         }
     }
     return out;
-#elif defined(__linux__) && !defined(__ANDROID__)
+#elif defined(__linux__)
     const unsigned long tid = sBeats[threadIdx].tid.load(std::memory_order_relaxed);
     if (tid == 0) {
         return {};
@@ -573,7 +601,7 @@ extern "C" void ThreadWatchdog_Start(void) {
     if (sWatcherRun.exchange(true)) {
         return;
     }
-#if defined(__linux__) && !defined(__ANDROID__) // Bionic has no backtrace()
+#if defined(__linux__)
     {
         // backtrace() lazily loads libgcc on first use, which fails inside a signal handler; load it now.
         void* preload[2];

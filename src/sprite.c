@@ -764,8 +764,18 @@ void spr_init_anim_state(SpriteComponent** compList, SpriteAnimComponent** animL
     }
 }
 
+#ifdef PORT
+extern s32 port_fast_forward_steps(void);
+#endif
+
 void spr_set_anim_timescale(f32 timescale) {
     SpriteAnimUpdateTimescale = timescale * 2.0f;
+#ifdef PORT
+    // Port: fast forward draws one of every N logic frames. Sprite animations
+    // at N x would be sampled in step with their own cycle (a 4-frame walk at
+    // 4x shows one pose), so they keep their real-time speed instead.
+    SpriteAnimUpdateTimescale /= port_fast_forward_steps();
+#endif
 }
 
 void spr_load_player_sprite(s32 spriteIndex) {
