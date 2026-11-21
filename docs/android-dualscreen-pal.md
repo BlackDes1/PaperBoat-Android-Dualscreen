@@ -60,6 +60,12 @@ Found, Recipes, Badges, Items, Options) and Items/Partner/Pause shortcuts.
 
 Design choices:
 
+* **Game art.** Like Star Haven, the bottom screen is drawn with the game's
+  own art: pause-menu icons, partner portraits, the world map, item icons and
+  the dialogue font. `src/port/companion/CompanionArt.cpp` decodes them from
+  the archive (by asset path) for `CompanionArt.kt`, which caches bitmaps and
+  draws text glyph by glyph; until the game has loaded them it falls back to
+  plain shapes and the system font.
 * **No second renderer.** The bottom screen is an Android `View`, not a
   second GL context or a copy of the game's frames. It costs no GPU work in
   the game's frame and cannot stall it.
