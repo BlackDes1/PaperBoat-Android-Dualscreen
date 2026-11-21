@@ -11,7 +11,10 @@ import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import java.util.concurrent.Executors
 
 /**
@@ -48,6 +51,22 @@ class CompanionArt(private val onLoaded: () -> Unit) {
 
     fun close() = loader.shutdownNow()
 
+    // A load that failed (the game had not opened its archive or loaded its
+    // font yet) is retried on the next draw; make sure there is one.
+    private val main = Handler(Looper.getMainLooper())
+    private var retryPosted = false
+
+    private fun retrySoon() {
+        synchronized(main) {
+            if (retryPosted) return
+            retryPosted = true
+        }
+        main.postDelayed({
+            synchronized(main) { retryPosted = false }
+            onLoaded()
+        }, RETRY_MS + 50)
+    }
+
     // ---- images ------------------------------------------------------------------
 
     /** The image [id] (an ART_* constant), or null while it is not loaded. */
@@ -69,6 +88,10 @@ class CompanionArt(private val onLoaded: () -> Unit) {
             synchronized(pending) {
                 pending -= k
                 if (bmp == null) retryAt[k] = SystemClock.uptimeMillis() + RETRY_MS
+            }
+            if (bmp == null) {
+                Log.d(TAG, "art ${if (item) "item " else ""}$key not ready")
+                retrySoon()
             }
             if (bmp != null) {
                 if (item) synchronized(items) { items[key] = bmp } else synchronized(art) { art[key] = bmp }
@@ -122,10 +145,15 @@ class CompanionArt(private val onLoaded: () -> Unit) {
         if (!CompanionBridge.available || now < fontRequested + RETRY_MS) return null
         fontRequested = now
         loader.execute {
-            val data = CompanionBridge.font() ?: return@execute
-            val w = CompanionBridge.fontWidths() ?: return@execute
-            val table = CompanionBridge.charset() ?: return@execute
-            val bmp = toBitmap(data, 3) ?: return@execute
+            val data = CompanionBridge.font()
+            val w = CompanionBridge.fontWidths()
+            val table = CompanionBridge.charset()
+            val bmp = data?.let { toBitmap(it, 3) }
+            if (data == null || w == null || table == null || bmp == null) {
+                Log.d(TAG, "font not ready: ${data != null} ${w != null} ${table != null}")
+                retrySoon()
+                return@execute
+            }
             val map = HashMap<Int, Int>()
             table.split('\u0001').forEachIndexed { code, s ->
                 if (s.isNotEmpty() && s.codePointCount(0, s.length) == 1) map.putIfAbsent(s.codePointAt(0), code)
@@ -277,6 +305,7 @@ class CompanionArt(private val onLoaded: () -> Unit) {
         const val ITEM_MUSHROOM = 0x08A
         const val ITEM_STAR_PIECE = 0x15C
 
+        private const val TAG = "PaperboatCompanion"
         private const val ITEM_KEY = 1 shl 20
         private const val RETRY_MS = 3000L
         private const val SPACE_WIDTH = 5

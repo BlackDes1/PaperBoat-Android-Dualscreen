@@ -54,13 +54,17 @@ object CompanionBridge {
     fun tattleText(actorType: Int): String? =
         if (!available) null else runCatching { nativeTattleText(actorType) }.getOrNull()
 
-    fun art(id: Int): IntArray? = if (!available) null else runCatching { nativeArt(id) }.getOrNull()
+    private fun <T> logged(name: String, f: () -> T): T? = runCatching(f).onFailure {
+        android.util.Log.w("PaperboatCompanion", "$name failed", it)
+    }.getOrNull()
 
-    fun itemIcon(item: Int): IntArray? = if (!available) null else runCatching { nativeItemIcon(item) }.getOrNull()
+    fun art(id: Int): IntArray? = if (!available) null else logged("nativeArt") { nativeArt(id) }
 
-    fun font(): IntArray? = if (!available) null else runCatching { nativeFont() }.getOrNull()
+    fun itemIcon(item: Int): IntArray? = if (!available) null else logged("nativeItemIcon") { nativeItemIcon(item) }
 
-    fun fontWidths(): ByteArray? = if (!available) null else runCatching { nativeFontWidths() }.getOrNull()
+    fun font(): IntArray? = if (!available) null else logged("nativeFont") { nativeFont() }
 
-    fun charset(): String? = if (!available) null else runCatching { nativeCharset() }.getOrNull()
+    fun fontWidths(): ByteArray? = if (!available) null else logged("nativeFontWidths") { nativeFontWidths() }
+
+    fun charset(): String? = if (!available) null else logged("nativeCharset") { nativeCharset() }
 }
