@@ -109,3 +109,6 @@ CMakeSettings.json
 CMakeUserPresets.json
 *.exe
 /.vs
+
+# CMake lock for android/patches
+external/libultraship.patch-lock
