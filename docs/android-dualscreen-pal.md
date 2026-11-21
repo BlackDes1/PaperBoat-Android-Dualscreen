@@ -9,6 +9,12 @@ This branch (`android-dualscreen`) is upstream PaperBoat `develop`
    shipped in the same APK as the US game,
 3. Android fixes found while testing on an AYN Thor (Adreno 740, Android 13).
 
+Known open issue: on the Thor, colour-indexed (CI4/CI8) textures render as
+noise in both regions. Pristine upstream `9dc47846b` does the same on that
+device; the device-extracted `pm64.o2r` decodes correctly on a PC, and neither
+`-fsigned-char` nor CPU palette decoding changed it, so the fault is in
+libultraship's runtime texture path on Android/Adreno.
+
 ## Where the Android port came from
 
 `PaperBoat-android-develop` was byte-identical to upstream commit `791d8042c`
@@ -99,7 +105,7 @@ US-only build.
 
 * Merge upstream `develop` into this branch; the Android work is a handful of
   commits and touches upstream files only in:
-  `CMakeLists.txt` (region outputs, `-fsigned-char`), `config.yml` (PAL output
+  `CMakeLists.txt` (region outputs), `config.yml` (PAL output
   name), `src/world/menus.c` (companion hook), `src/port/Engine.cpp`,
   `src/port/android/AndroidBridge.cpp`, `src/port/save/Save*.cpp` (archive and
   save-dir macros), `src/port/DevTools/ThreadWatchdog.cpp` (Bionic guard),
