@@ -44,6 +44,8 @@ object CompanionBridge {
 
     @JvmStatic private external fun nativeSetFastForward(steps: Int)
 
+    @JvmStatic private external fun nativeAltAssets(): Boolean
+
     fun page(page: Int): String =
         if (!available) "" else runCatching { nativePage(page) }.getOrDefault("")
 
@@ -83,4 +85,7 @@ object CompanionBridge {
             field = value.coerceIn(1, 4)
             if (available) logged("nativeSetFastForward") { nativeSetFastForward(field) }
         }
+
+    /** Whether HD textures are on in the running game. */
+    fun altAssets(): Boolean = available && (logged("nativeAltAssets") { nativeAltAssets() } ?: false)
 }

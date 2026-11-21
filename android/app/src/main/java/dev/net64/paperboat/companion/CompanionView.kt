@@ -282,6 +282,7 @@ class CompanionView(
         canvas.drawRect(0f, 0f, gridW, gridH, bg)
 
         hits.clear()
+        art.checkHd()
         panelBox(canvas, panel.left, panel.top, panel.right, panel.bottom, COL_PANEL)
         drawPage(canvas)
         drawRail(canvas)

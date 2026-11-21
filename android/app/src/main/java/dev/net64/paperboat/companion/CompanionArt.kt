@@ -46,6 +46,7 @@ class CompanionArt(private val onLoaded: () -> Unit) {
     @Volatile private var font: Bitmap? = null
     private var glyphCount = 0
     private var glyphRows = 0
+    private var glyphCell = 16   // sheet pixels per glyph cell (64 with an HD pack)
     private var widths = ByteArray(0)
     private val codes = HashMap<Int, Int>()
     private var fontRequested = 0L
@@ -78,6 +79,26 @@ class CompanionArt(private val onLoaded: () -> Unit) {
     }
 
     // ---- images ------------------------------------------------------------------
+
+    private var altOn: Boolean? = null
+    private var altCheckedAt = 0L
+
+    /** Call once a frame: reloads every image when HD textures are switched on or off. */
+    fun checkHd() {
+        val now = SystemClock.uptimeMillis()
+        if (now - altCheckedAt < 2000) return
+        altCheckedAt = now
+        val on = CompanionBridge.altAssets()
+        if (altOn != null && on != altOn) {
+            synchronized(art) { art.clear() }
+            synchronized(items) { items.clear() }
+            synchronized(hd) { hd.clear() }
+            synchronized(pending) { retryAt.clear() }
+            font = null
+            fontRequested = 0
+        }
+        altOn = on
+    }
 
     /** The image [id] (an ART_* constant), or null while it is not loaded. */
     fun image(id: Int): Bitmap? = synchronized(art) { art[id] } ?: run { request(id, false); null }
@@ -167,7 +188,7 @@ class CompanionArt(private val onLoaded: () -> Unit) {
             val data = CompanionBridge.font()
             val w = CompanionBridge.fontWidths()
             val table = CompanionBridge.charset()
-            val bmp = data?.let { toBitmap(it, 3) }
+            val bmp = data?.let { toBitmap(it, 4) }
             if (data == null || w == null || table == null || bmp == null) {
                 Log.d(TAG, "font not ready: ${data != null} ${w != null} ${table != null}")
                 retrySoon()
@@ -183,6 +204,7 @@ class CompanionArt(private val onLoaded: () -> Unit) {
                 widths = w
                 glyphCount = data[2]
                 glyphRows = (glyphCount + 15) / 16
+                glyphCell = 16 * data[3] / 1000
             }
             font = bmp
             onLoaded()
@@ -235,9 +257,11 @@ class CompanionArt(private val onLoaded: () -> Unit) {
         }
         tinted.colorFilter = null
         tinted.alpha = alpha
+        tinted.isFilterBitmap = glyphCell > 16
         var cx = x
         var i = 0
-        val half = glyphRows * 16
+        val k = glyphCell / 16
+        val half = glyphRows * glyphCell
         while (i < s.length) {
             val cp = s.codePointAt(i)
             i += Character.charCount(cp)
@@ -248,14 +272,15 @@ class CompanionArt(private val onLoaded: () -> Unit) {
             }
             val adv = advance(code)
             val cw = minOf(adv + 2, 16)
-            val gx = (code % 16) * 16
-            val gy = (if (white) half else 0) + (code / 16) * 16
-            src.set(gx, gy, gx + cw, gy + 16)
+            val gx = (code % 16) * glyphCell
+            val gy = (if (white) half else 0) + (code / 16) * glyphCell
+            src.set(gx, gy, gx + cw * k, gy + glyphCell)
             dst.set(cx, y, cx + cw * scale, y + 16f * scale)
             c.drawBitmap(f, src, dst, tinted)
             cx += adv * scale
         }
         tinted.alpha = 255
+        tinted.isFilterBitmap = false
         return cx
     }
 

@@ -118,6 +118,53 @@ std::shared_ptr<Fast::Texture> Load(const char* path, bool exact = false) {
     return tex;
 }
 
+constexpr const char* kOtr = "__OTR__";
+
+std::string BasePath(const char* path) {
+    std::string p = path ? path : "";
+    if (p.rfind(kOtr, 0) == 0) {
+        p.erase(0, 7);
+    }
+    return p;
+}
+
+bool AltAssetsOn() {
+    return CVarGetInteger("gEnhancements.Mods.AlternateAssets", 0) != 0;
+}
+
+bool HasFile(const std::string& path) {
+    auto ctx = Ship::Context::GetRawInstance();
+    auto rm = ctx ? ctx->GetResourceManager() : nullptr;
+    auto am = rm ? rm->GetArchiveManager() : nullptr;
+    return am && am->HasFile(path);
+}
+
+// The HD pack's replacement, looked up as the renderer does (interpreter.cpp):
+// "alt/<raster>@<palette file>" for a palette variant, then "alt/<raster>".
+std::shared_ptr<Fast::Texture> LoadHd(const char* raster, const char* palette) {
+    if (raster == nullptr || !AltAssetsOn()) {
+        return nullptr;
+    }
+    const std::string base = "alt/" + BasePath(raster);
+    std::vector<std::string> tries;
+    if (palette != nullptr) {
+        std::string pal = BasePath(palette);
+        const size_t slash = pal.find_last_of('/');
+        tries.push_back(base + "@" + (slash == std::string::npos ? pal : pal.substr(slash + 1)));
+    }
+    tries.push_back(base);
+    for (const auto& t : tries) {
+        if (!HasFile(t)) {
+            continue;
+        }
+        auto tex = Load(t.c_str(), true);
+        if (tex && (tex->Flags & TEX_FLAG_LOAD_AS_RAW) != 0 && tex->Type == Fast::TextureType::RGBA32bpp) {
+            return tex;
+        }
+    }
+    return nullptr;
+}
+
 uint32_t Argb(uint32_t r, uint32_t g, uint32_t b, uint32_t a) {
     return (a << 24) | (r << 16) | (g << 8) | b;
 }
@@ -218,7 +265,10 @@ jintArray ToJava(JNIEnv* env, const std::vector<uint32_t>& px, int w, int h, int
 }
 
 jintArray DecodeToJava(JNIEnv* env, const char* raster, const char* palette) {
-    auto tex = Load(raster);
+    auto tex = LoadHd(raster, palette);
+    if (!tex) {
+        tex = Load(raster, true);
+    }
     if (!tex) {
         return nullptr;
     }
@@ -270,9 +320,12 @@ JNIEXPORT jintArray JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_n
 }
 
 /**
- * The dialogue font as one sheet: 16 glyphs a row, 16x16 cells, the standard
- * (dark) palette in the top half and the white one in the bottom half.
- * Returns { width, height, glyph count, pixels... }.
+ * The dialogue font as one sheet: 16 glyphs a row, the standard (dark) palette
+ * in the top half and the white one in the bottom half. Cells are 16x16, or
+ * 64x64 with an HD pack: its glyphs ("charset_standard_N@..._palette_10" dark,
+ * plain "charset_standard_N" white) shrunk to the cell, the ones it lacks
+ * enlarged from the game's own. Returns { width, height, glyph count,
+ * cell scale x1000, pixels... }.
  */
 JNIEXPORT jintArray JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_nativeFont(JNIEnv* env, jclass) {
     const uint8_t* pals = reinterpret_cast<const uint8_t*>(D_802F4560);
@@ -300,28 +353,80 @@ JNIEXPORT jintArray JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_n
     if (glyphs.empty()) {
         return nullptr;
     }
+    const bool hd = AltAssetsOn() && HasFile("alt/charset/charset_standard_33");
+    const int cell = hd ? 64 : kGlyph;
     const int count = (int) glyphs.size();
     const int rows = (count + kFontCols - 1) / kFontCols;
-    const int w = kFontCols * kGlyph, half = rows * kGlyph, h = half * 2;
+    const int w = kFontCols * cell, half = rows * cell, h = half * 2;
     std::vector<uint32_t> sheet((size_t) w * h, 0);
     for (int pass = 0; pass < 2; pass++) {
-        const uint8_t* pal = pals + (pass == 0 ? kPalStandard : kPalWhite) * 16;
-        const size_t palBytes = sizeof(D_802F4560) - (pass == 0 ? kPalStandard : kPalWhite) * 16;
+        const int palIdx = pass == 0 ? kPalStandard : kPalWhite;
+        const uint8_t* pal = pals + palIdx * 16;
+        const size_t palBytes = sizeof(D_802F4560) - palIdx * 16;
         for (int g = 0; g < count; g++) {
+            const int ox = (g % kFontCols) * cell, oy = pass * half + (g / kFontCols) * cell;
             std::vector<uint32_t> px;
-            int gw, gh;
+            int gw = 0, gh = 0;
+            if (hd) {
+                char alt[96];
+                if (pass == 0) {
+                    snprintf(alt, sizeof(alt), "alt/charset/charset_standard_%d@charset_standard_palette_%d", g, palIdx);
+                } else {
+                    snprintf(alt, sizeof(alt), "alt/charset/charset_standard_%d", g);
+                }
+                if (HasFile(alt)) {
+                    auto t = Load(alt, true);
+                    if (t && Decode(*t, nullptr, 0, px, gw, gh) && gw >= cell && gh >= cell) {
+                        // box-filter the HD glyph down to the cell (premultiplied)
+                        const int k = gw / cell;
+                        for (int y = 0; y < cell; y++) {
+                            for (int x = 0; x < cell; x++) {
+                                uint32_t r = 0, gg = 0, b = 0, a = 0;
+                                for (int yy = 0; yy < k; yy++) {
+                                    for (int xx = 0; xx < k; xx++) {
+                                        const uint32_t c = px[(size_t) (y * k + yy) * gw + x * k + xx];
+                                        const uint32_t ca = c >> 24;
+                                        a += ca;
+                                        r += ((c >> 16) & 255) * ca;
+                                        gg += ((c >> 8) & 255) * ca;
+                                        b += (c & 255) * ca;
+                                    }
+                                }
+                                const uint32_t n = (uint32_t) (k * k);
+                                sheet[(size_t) (oy + y) * w + ox + x] =
+                                    a == 0 ? 0 : Argb(r / a, gg / a, b / a, a / n);
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
             if (!Decode(*glyphs[g], pal, palBytes, px, gw, gh)) {
                 continue;
             }
-            const int ox = (g % kFontCols) * kGlyph, oy = pass * half + (g / kFontCols) * kGlyph;
-            for (int y = 0; y < gh && y < kGlyph; y++) {
-                for (int x = 0; x < gw && x < kGlyph; x++) {
-                    sheet[(size_t) (oy + y) * w + ox + x] = px[(size_t) y * gw + x];
+            const int up = cell / kGlyph;  // the game's glyph, enlarged
+            for (int y = 0; y < cell && y / up < gh; y++) {
+                for (int x = 0; x < cell && x / up < gw; x++) {
+                    sheet[(size_t) (oy + y) * w + ox + x] = px[(size_t) (y / up) * gw + x / up];
                 }
             }
         }
     }
-    return ToJava(env, sheet, w, h, count);
+    // header: width, height, count, then the cell scale like the images'
+    const int head = 4;
+    jintArray arr = env->NewIntArray((jsize) (sheet.size() + head));
+    if (arr == nullptr) {
+        return nullptr;
+    }
+    jint hdr[4] = { w, h, count, cell / kGlyph * 1000 };
+    env->SetIntArrayRegion(arr, 0, head, hdr);
+    env->SetIntArrayRegion(arr, head, (jsize) sheet.size(), reinterpret_cast<const jint*>(sheet.data()));
+    return arr;
+}
+
+/** Whether HD textures (alternate assets) are on: the art is reloaded when this changes. */
+JNIEXPORT jboolean JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_nativeAltAssets(JNIEnv*, jclass) {
+    return AltAssetsOn() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jbyteArray JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_nativeFontWidths(JNIEnv* env,
