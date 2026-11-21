@@ -144,8 +144,10 @@ class ModsActivity : ComponentActivity() {
             textSize = 15f
         })
         label.addView(TextView(this).apply {
-            text = if (mod.enabled) mod.kind else "${mod.kind} · disabled"
-            setTextColor(SUBTLE)
+            val state = if (mod.enabled) mod.kind else "${mod.kind} · disabled"
+            val problem = mod.problem
+            text = if (problem == null) state else "$state · ⚠ $problem"
+            setTextColor(if (problem == null) SUBTLE else Color.rgb(255, 150, 120))
             textSize = 11f
         })
         row.addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))

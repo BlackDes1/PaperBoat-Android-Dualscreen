@@ -36,6 +36,34 @@ object ModStore {
                 name.endsWith(".zip", ignoreCase = true) -> "zip"
                 else -> "o2r"
             }
+
+        /**
+         * Why the engine will skip this mod, or null if it looks loadable. The
+         * engine only logs a broken archive ("Not a zip archive") and carries on,
+         * so this is where the player finds out.
+         */
+        val problem: String? by lazy { checkLoadable(file, isFolder) }
+    }
+
+    /** .o2r/.otr/.zip mods are zip archives; anything else is skipped by the engine. */
+    private fun checkLoadable(file: File, isFolder: Boolean): String? {
+        if (isFolder) {
+            return if (file.listFiles().isNullOrEmpty()) "empty folder" else null
+        }
+        val name = file.name.removeSuffix(DISABLED_SUFFIX).lowercase()
+        if (!(name.endsWith(".o2r") || name.endsWith(".otr") || name.endsWith(".zip"))) {
+            return "not an .o2r, .otr or .zip"
+        }
+        return try {
+            val magic = ByteArray(4)
+            val read = file.inputStream().use { it.read(magic) }
+            // PK\3\4 (an archive) or PK\5\6 (an empty one)
+            if (read == 4 && magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte() &&
+                (magic[2].toInt() == 3 || magic[2].toInt() == 5)) null
+            else "not a valid archive: the game will skip it"
+        } catch (e: IOException) {
+            "unreadable: ${e.message}"
+        }
     }
 
     /** Mods in load order: the last entry wins where two mods touch the same file. */
