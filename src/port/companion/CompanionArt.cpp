@@ -103,7 +103,7 @@ std::shared_ptr<Fast::Texture> Load(const char* path) {
     if (path == nullptr || path[0] == '\0') {
         return nullptr;
     }
-    auto ctx = Ship::Context::GetInstance();
+    auto ctx = Ship::Context::GetRawInstance();
     if (!ctx || !ctx->GetResourceManager()) {
         return nullptr;
     }
