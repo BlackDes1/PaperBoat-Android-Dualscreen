@@ -335,11 +335,13 @@ void GameEngine::FinishInit() {
     Ship::Context::GetRawInstance()->InitAudio({ .SampleRate = 32000, .SampleLength = 1024, .DesiredBuffered = 1680 });
 
     // Opt in to texture path memoization.
+#ifndef __ANDROID__ // TEMP test: memo keyed by path pointer, suspected stale on Android
     if (gsFast3dWindow != nullptr) {
         if (auto interpreter = gsFast3dWindow->GetInterpreterWeak().lock()) {
             interpreter->SetResolvedResourceCacheEnabled(true);
         }
     }
+#endif
     TextureCache_Configure();
 
     auto loader = Ship::Context::GetRawInstance()->GetResourceManager()->GetResourceLoader();
