@@ -31,11 +31,17 @@ class ModsActivity : ComponentActivity() {
     private lateinit var emptyLabel: TextView
     private var mods: MutableList<ModStore.Mod> = mutableListOf()
     private var dirty = false
+    private var hdButton: Button? = null
+
+    /** The switch for HD texture packs (PC: Mods menu > Use Alternate Assets). */
+    private fun updateHdButton() {
+        hdButton?.text = if (HdTextures.isOn(this)) "HD textures: On" else "HD textures: Off"
+    }
 
     private val importArchives =
         registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
             if (uris.isNullOrEmpty()) return@registerForActivityResult
-            runInBackground("Importing…") {
+            runInBackground("Importing…", hdCheck = true) {
                 uris.mapNotNull { ModStore.importArchive(this, it) }
             }
         }
@@ -43,7 +49,7 @@ class ModsActivity : ComponentActivity() {
     private val importFolder =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri == null) return@registerForActivityResult
-            runInBackground("Importing folder…") {
+            runInBackground("Importing folder…", hdCheck = true) {
                 listOfNotNull(ModStore.importFolder(this, uri))
             }
         }
@@ -109,6 +115,14 @@ class ModsActivity : ComponentActivity() {
         actions.addView(button("Import mod") { importArchives.launch(arrayOf("*/*")) })
         actions.addView(button("Import folder") { importFolder.launch(null) })
         actions.addView(button("Saves") { startActivity(Intent(this, SavesActivity::class.java)) })
+        val hd = button("") {
+            HdTextures.set(this, !HdTextures.isOn(this))
+            dirty = true
+            updateHdButton()
+        }
+        hdButton = hd
+        actions.addView(hd)
+        updateHdButton()
         actions.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         actions.addView(button("Restart game") { restartGame() })
         actions.addView(button("Done") { finish() })
@@ -193,7 +207,7 @@ class ModsActivity : ComponentActivity() {
      * Imports and exports move real data around, so they run off the main
      * thread behind a blocking progress dialog.
      */
-    private fun runInBackground(message: String, work: () -> List<String>) {
+    private fun runInBackground(message: String, hdCheck: Boolean = false, work: () -> List<String>) {
         val progress = AlertDialog.Builder(this)
             .setMessage(message)
             .setCancelable(false)
@@ -201,9 +215,16 @@ class ModsActivity : ComponentActivity() {
 
         thread(name = "mods-io") {
             val errors = runCatching(work).getOrElse { listOf(it.message ?: it.toString()) }
+            // An HD texture pack shows nothing until alternate assets are on.
+            val turnOnHd = hdCheck && !HdTextures.isOn(this) && HdTextures.anyEnabledPack(this)
+            if (turnOnHd) HdTextures.set(this, true)
 
             runOnUiThread {
                 progress.dismiss()
+                if (turnOnHd) {
+                    Toast.makeText(this, "HD texture pack found: HD textures turned on.", Toast.LENGTH_LONG).show()
+                }
+                updateHdButton()
                 if (errors.isEmpty()) {
                     dirty = true
                 } else {

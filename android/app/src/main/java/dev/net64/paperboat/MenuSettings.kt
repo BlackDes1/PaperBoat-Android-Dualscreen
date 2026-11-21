@@ -122,6 +122,17 @@ object MenuSettings {
                     0, listOf(0 to "Three-point (N64)", 1 to "Linear", 2 to "None (sharp)"),
                 ),
                 MenuSetting.Toggle(
+                    HdTextures.CVAR, "HD textures",
+                    "Uses the HD textures of texture packs in Mods (their alternate assets). " +
+                        "PC: Mods > Use Alternate Assets.",
+                    false,
+                ),
+                MenuSetting.Toggle(
+                    HdTextures.MIPMAPS_CVAR, "HD texture mipmaps",
+                    "Smooths HD textures seen from afar. Turn off if a pack looks blurry.",
+                    true,
+                ),
+                MenuSetting.Toggle(
                     "gEnhancements.Graphics.FullHeightView", "Full height view",
                     "Removes the black bars at the top and bottom during gameplay.",
                     false,

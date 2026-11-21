@@ -30,6 +30,16 @@ class CompanionArt(private val onLoaded: () -> Unit) {
     private val art = HashMap<Int, Bitmap>()
     private val items = HashMap<Int, Bitmap>()
     private val pending = HashSet<Int>()
+    // HD texture pack images: their pixels per original N64 pixel. They are
+    // drawn at the original's size, so layouts stay put with a pack on.
+    private val hd = java.util.IdentityHashMap<Bitmap, Float>()
+
+    private fun scaleOf(b: Bitmap): Float = synchronized(hd) { hd[b] } ?: 1f
+
+    /** Size of [b] in original N64 pixels. */
+    fun widthOf(b: Bitmap): Float = b.width / scaleOf(b)
+
+    fun heightOf(b: Bitmap): Float = b.height / scaleOf(b)
     private val retryAt = HashMap<Int, Long>()
 
     // ---- font ------------------------------------------------------------------
@@ -84,7 +94,8 @@ class CompanionArt(private val onLoaded: () -> Unit) {
         }
         loader.execute {
             val data = if (item) CompanionBridge.itemIcon(key) else CompanionBridge.art(key)
-            val bmp = data?.let { toBitmap(it, 2) }
+            val bmp = data?.let { toBitmap(it, 3) }
+            if (bmp != null && data[2] > 1000) synchronized(hd) { hd[bmp] = data[2] / 1000f }
             synchronized(pending) {
                 pending -= k
                 if (bmp == null) retryAt[k] = SystemClock.uptimeMillis() + RETRY_MS
@@ -110,31 +121,39 @@ class CompanionArt(private val onLoaded: () -> Unit) {
 
     /** Draws [b] at (x, y) scaled by [scale]; [dim] greys it out, [alpha] fades it. */
     fun draw(c: Canvas, b: Bitmap, x: Float, y: Float, scale: Float = 1f, dim: Boolean = false, alpha: Int = 255) {
-        dst.set(x, y, x + b.width * scale, y + b.height * scale)
+        dst.set(x, y, x + widthOf(b) * scale, y + heightOf(b) * scale)
         pixel.colorFilter = if (dim) grey else null
         pixel.alpha = alpha
+        pixel.isFilterBitmap = scaleOf(b) > 1f
         c.drawBitmap(b, null, dst, pixel)
+        pixel.isFilterBitmap = false
         pixel.colorFilter = null
         pixel.alpha = 255
     }
 
     /** Draws [b] fitted into a [size]-square box at (x, y), keeping its shape. */
     fun drawFit(c: Canvas, b: Bitmap, x: Float, y: Float, size: Float, dim: Boolean = false, alpha: Int = 255) {
-        val s = size / maxOf(b.width, b.height)
-        draw(c, b, x + (size - b.width * s) / 2f, y + (size - b.height * s) / 2f, s, dim, alpha)
+        val s = size / maxOf(widthOf(b), heightOf(b))
+        draw(c, b, x + (size - widthOf(b) * s) / 2f, y + (size - heightOf(b) * s) / 2f, s, dim, alpha)
     }
 
     /** Draws [b] as a solid silhouette of [color] (Star Haven's tinted map markers). */
     fun drawTinted(c: Canvas, b: Bitmap, x: Float, y: Float, scale: Float, color: Int) {
-        dst.set(x, y, x + b.width * scale, y + b.height * scale)
+        dst.set(x, y, x + widthOf(b) * scale, y + heightOf(b) * scale)
         tinted.colorFilter = PorterDuffColorFilter(color, PorterDuff.Mode.MULTIPLY)
+        tinted.isFilterBitmap = scaleOf(b) > 1f
         c.drawBitmap(b, null, dst, tinted)
+        tinted.isFilterBitmap = false
+        tinted.colorFilter = null
     }
 
-    /** Draws part of [b] ([sx], [sy], [sw], [sh] in image pixels) into a rectangle. */
+    /** Draws part of [b] ([sx], [sy], [sw], [sh] in original N64 pixels) into a rectangle. */
     fun drawPart(c: Canvas, b: Bitmap, sx: Int, sy: Int, sw: Int, sh: Int, d: RectF) {
-        src.set(sx, sy, sx + sw, sy + sh)
+        val k = scaleOf(b)
+        src.set((sx * k).toInt(), (sy * k).toInt(), ((sx + sw) * k).toInt(), ((sy + sh) * k).toInt())
+        pixel.isFilterBitmap = k > 1f
         c.drawBitmap(b, src, d, pixel)
+        pixel.isFilterBitmap = false
     }
 
     // ---- text in the game's font ------------------------------------------------------

@@ -7,8 +7,10 @@
  *
  * Runs on whatever thread calls the JNI functions (the companion view's art
  * loader thread); the resource manager is thread safe. Every result is an
- * int[] of { width, height, pixels... } (ARGB), or null when the asset is not
- * in the archive (yet).
+ * int[] of { width, height, scale, pixels... } (ARGB; scale is the image's
+ * pixels per original N64 pixel x1000, above 1000 for an HD texture pack's
+ * replacement), or null when the asset is not in the archive (yet). The font
+ * always comes from the game's own glyphs.
  */
 #include <jni.h>
 
@@ -99,7 +101,7 @@ Art ArtFor(int id) {
     return { nullptr, nullptr };
 }
 
-std::shared_ptr<Fast::Texture> Load(const char* path) {
+std::shared_ptr<Fast::Texture> Load(const char* path, bool exact = false) {
     if (path == nullptr || path[0] == '\0') {
         return nullptr;
     }
@@ -107,7 +109,8 @@ std::shared_ptr<Fast::Texture> Load(const char* path) {
     if (!ctx || !ctx->GetResourceManager()) {
         return nullptr;
     }
-    auto res = ctx->GetResourceManager()->LoadResource(path);
+    // exact: the game's own asset even when an HD pack (alternate assets) is on
+    auto res = ctx->GetResourceManager()->LoadResource(path, exact);
     auto tex = std::dynamic_pointer_cast<Fast::Texture>(res);
     if (!tex || tex->ImageData == nullptr) {
         return nullptr;
@@ -137,13 +140,7 @@ bool Decode(const Fast::Texture& t, const uint8_t* pal, size_t palBytes, std::ve
         return false;
     }
     if ((t.Flags & TEX_FLAG_LOAD_AS_RAW) != 0) {
-        // HD replacement: RGBA32 at some multiple of the original size
-        double k = std::sqrt((double) t.ImageDataSize / (4.0 * n));
-        if (k < 1.0) {
-            return false;
-        }
-        w = (int) std::lround(w * k);
-        h = (int) std::lround(h * k);
+        // HD replacement (texture pack): RGBA32 at its full size
         if ((size_t) w * h * 4 > t.ImageDataSize) {
             return false;
         }
@@ -227,7 +224,7 @@ jintArray DecodeToJava(JNIEnv* env, const char* raster, const char* palette) {
     }
     std::shared_ptr<Fast::Texture> pal;
     if (tex->Type == Fast::TextureType::Palette4bpp || tex->Type == Fast::TextureType::Palette8bpp) {
-        pal = Load(palette);
+        pal = Load(palette, true);
         if (!pal) {
             return nullptr;
         }
@@ -237,7 +234,12 @@ jintArray DecodeToJava(JNIEnv* env, const char* raster, const char* palette) {
     if (!Decode(*tex, pal ? pal->ImageData : nullptr, pal ? pal->ImageDataSize : 0, px, w, h)) {
         return nullptr;
     }
-    return ToJava(env, px, w, h);
+    // An HD texture is drawn at the original's size: its pixels per N64 pixel, x1000
+    int scale = 1000;
+    if ((tex->Flags & TEX_FLAG_LOAD_AS_RAW) != 0 && tex->VPixelScale > 1.0f) {
+        scale = (int) std::lround(tex->VPixelScale * 1000.0f);
+    }
+    return ToJava(env, px, w, h, scale);
 }
 
 constexpr int kGlyph = 16;
@@ -289,7 +291,7 @@ JNIEXPORT jintArray JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_n
     for (int g = 0; g < kMaxGlyphs; g++) {
         char path[64];
         snprintf(path, sizeof(path), "__OTR__charset/charset_standard_%d", g);
-        auto t = Load(path);
+        auto t = Load(path, true);
         if (!t) {
             break;
         }

@@ -17,6 +17,7 @@
 
 #include "port/hooks/Events.h"
 #include "port/ShipInit.hpp"
+#include <libultraship/libultraship.h>
 
 namespace {
 
@@ -113,8 +114,28 @@ void companion_store_tattle_text(int actorType, const char* text) {
 
 } // extern "C"
 
+// "Use Alternate Assets" (HD texture packs) set from the Android menus. CVars
+// belong to the game thread, so the value waits here for the next frame.
+static std::atomic<int> sAltAssetsRequest { -1 };
+
+static void ApplyAltAssetsRequest() {
+    const int value = sAltAssetsRequest.exchange(-1);
+    if (value < 0) {
+        return;
+    }
+    CVarSetInteger("gEnhancements.Mods.AlternateAssets", value);
+    if (auto window = Ship::Context::GetRawInstance()->GetWindow()) {
+        if (auto gui = window->GetGui()) {
+            gui->SaveConsoleVariablesNextFrame();
+        }
+    }
+}
+
 static void RegisterCompanionScreen() {
-    REGISTER_LISTENER(GameFrameUpdate, EVENT_PRIORITY_NORMAL, [](IEvent*) { companion_game_frame(); });
+    REGISTER_LISTENER(GameFrameUpdate, EVENT_PRIORITY_NORMAL, [](IEvent*) {
+        ApplyAltAssetsRequest();
+        companion_game_frame();
+    });
 }
 
 static RegisterShipInitFunc initCompanionScreen(RegisterCompanionScreen);
@@ -131,6 +152,12 @@ std::string CopyPage(int page) {
 } // namespace
 
 extern "C" {
+
+/** Turns HD textures (alternate assets) on or off from the next game frame. */
+JNIEXPORT void JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_nativeSetAltAssets(JNIEnv*, jclass,
+                                                                                            jboolean on) {
+    sAltAssetsRequest = on ? 1 : 0;
+}
 
 /** Marks a page wanted and returns its latest JSON ("" until first built). */
 JNIEXPORT jstring JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_nativePage(JNIEnv* env, jclass,

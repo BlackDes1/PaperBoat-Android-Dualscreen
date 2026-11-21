@@ -40,6 +40,8 @@ object CompanionBridge {
 
     @JvmStatic private external fun nativeCharset(): String?
 
+    @JvmStatic private external fun nativeSetAltAssets(on: Boolean)
+
     fun page(page: Int): String =
         if (!available) "" else runCatching { nativePage(page) }.getOrDefault("")
 
@@ -67,4 +69,9 @@ object CompanionBridge {
     fun fontWidths(): ByteArray? = if (!available) null else logged("nativeFontWidths") { nativeFontWidths() }
 
     fun charset(): String? = if (!available) null else logged("nativeCharset") { nativeCharset() }
+
+    /** HD textures on or off in the running game (from its next frame). */
+    fun setAltAssets(on: Boolean) {
+        if (available) logged("nativeSetAltAssets") { nativeSetAltAssets(on) }
+    }
 }
