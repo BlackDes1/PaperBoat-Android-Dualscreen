@@ -7,13 +7,22 @@ This branch (`android-dualscreen`) is upstream PaperBoat `develop`
 2. the PAL game (English/German/French/Spanish) from
    [JeanPatrick33/PaperBoat `pal-support`](https://github.com/JeanPatrick33/PaperBoat),
    shipped in the same APK as the US game,
-3. Android fixes found while testing on an AYN Thor (Adreno 740, Android 13).
+3. Android fixes found while testing on an AYN Thor (Adreno 740, Android 13),
+4. Android work from [chris43123/PaperBoat](https://github.com/chris43123/PaperBoat)
+   (`airx` branch), cherry-picked: native heap pointer tagging off, signed
+   `char` on Android, highp GLES shaders, the main menu, the in-game pause
+   menu and button mapping. The main menu also has a "Game:" button that
+   switches between the US and European game.
 
-Known open issue: on the Thor, colour-indexed (CI4/CI8) textures render as
-noise in both regions. Pristine upstream `9dc47846b` does the same on that
-device; the device-extracted `pm64.o2r` decodes correctly on a PC, and neither
-`-fsigned-char` nor CPU palette decoding changed it, so the fault is in
-libultraship's runtime texture path on Android/Adreno.
+### Garbled textures (fixed)
+
+Colour-indexed (CI4/CI8) textures rendered as noise on the Thor in both
+regions, also on pristine upstream. The extracted `pm64.o2r` decodes correctly
+on a PC, so extraction was not the cause. The cause was Android 11+ arm64
+heap pointer tagging: Bionic sets the top byte of heap pointers, and code
+that keys on raw pointer values breaks. `android:allowNativeHeapPointerTagging="false"`
+in `AndroidManifest.xml` turns it off (taken from chris43123 `b630b3b2a`).
+Do not remove it.
 
 ## Where the Android port came from
 
@@ -117,3 +126,9 @@ US-only build.
   `:palcore` if both regions should still share one APK.
 * Keep `android/palcore/build.gradle.kts` CMake arguments in step with
   `android/app/build.gradle.kts`.
+* `android/patches/libultraship-*.patch` are applied to the libultraship
+  submodule at CMake configure time. After a submodule bump, check they still
+  apply (`git -C external/libultraship apply --check`).
+* Menu, Settings and Button mapping run in the `:menu` process, the launcher
+  in `:launcher`, the game in the main process. The game process cannot be
+  restarted in place: quitting it ends the process and returns to the menu.
