@@ -74,9 +74,26 @@ object GameAssets {
 
     fun isExtracted(context: Context, region: Region) = gameArchive(context, region).length() > 0
 
-    /** Whether this APK carries the region's game (a US-only build leaves PAL out). */
-    fun isBuilt(context: Context, region: Region): Boolean =
-        File(context.applicationInfo.nativeLibraryDir, "lib${region.library}.so").isFile
+    /**
+     * Whether this APK carries the region's game (a US-only build leaves PAL
+     * out). Libraries normally stay uncompressed inside the APK rather than
+     * being extracted to nativeLibraryDir, so look in both.
+     */
+    fun isBuilt(context: Context, region: Region): Boolean = builtCache.getOrPut(region) {
+        val name = "lib${region.library}.so"
+        val info = context.applicationInfo
+        if (File(info.nativeLibraryDir, name).isFile) return@getOrPut true
+        val apks = listOf(info.sourceDir) + (info.splitSourceDirs?.toList() ?: emptyList())
+        apks.any { apk ->
+            runCatching {
+                java.util.zip.ZipFile(apk).use { zip ->
+                    zip.entries().asSequence().any { it.name.startsWith("lib/") && it.name.endsWith("/$name") }
+                }
+            }.getOrDefault(false)
+        }
+    }
+
+    private val builtCache = HashMap<Region, Boolean>()
 
     /** The region the game starts in: the last one launched or extracted. */
     fun activeRegion(context: Context): Region {
