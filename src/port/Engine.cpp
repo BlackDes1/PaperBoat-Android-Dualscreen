@@ -23,7 +23,7 @@
 #include <cerrno>
 #include <exception>
 #include <typeinfo>
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 #include <execinfo.h>
 #endif
 #include <cstring>
@@ -225,7 +225,7 @@ GameEngine::GameEngine() {
         } catch (...) {
             SPDLOG_CRITICAL("Uncaught non-standard exception");
         }
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
         void* frames[48];
         int n = backtrace(frames, 48);
         char** syms = backtrace_symbols(frames, n);

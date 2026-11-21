@@ -13,7 +13,7 @@
 
 #include "port/os/OS.h"
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__) // Bionic has no backtrace()
 #include <csignal>
 #include <dlfcn.h>
 #include <execinfo.h>
@@ -127,7 +127,7 @@ const std::string& ProjectSourceRoot() {
     return root;
 }
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__) // Bionic has no backtrace()
 // Linux has no way to suspend and walk another thread, so the watcher signals
 // it and the handler records its own backtrace.
 void* sLinuxFrames[48];
@@ -327,7 +327,7 @@ std::string CaptureStalledStack(int threadIdx) {
         }
     }
     return out;
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(__ANDROID__)
     const unsigned long tid = sBeats[threadIdx].tid.load(std::memory_order_relaxed);
     if (tid == 0) {
         return {};
@@ -573,7 +573,7 @@ extern "C" void ThreadWatchdog_Start(void) {
     if (sWatcherRun.exchange(true)) {
         return;
     }
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__) // Bionic has no backtrace()
     {
         // backtrace() lazily loads libgcc on first use, which fails inside a signal handler; load it now.
         void* preload[2];
