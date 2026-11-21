@@ -96,6 +96,12 @@ class MenuActivity : ComponentActivity() {
         actions.addView(bigButton("Settings") { openSettings() }, spacing)
         actions.addView(bigButton("Mods") { startActivity(Intent(this, ModsActivity::class.java)) }, spacing)
         actions.addView(bigButton("Saves") { startActivity(Intent(this, SavesActivity::class.java)) }, spacing)
+        // US / Europe: the launcher asks which game when both are extracted,
+        // and takes another ROM otherwise.
+        actions.addView(bigButton("Game: ${GameAssets.activeRegion(this).label}") {
+            startActivity(Intent(this, LauncherActivity::class.java))
+            finish()
+        }, spacing)
         actions.addView(bigButton("Exit") { finishAndRemoveTask() }, spacing)
         actions.addView(hintBar("Ⓐ Select    Ⓑ Back"))
         root.addView(actions)

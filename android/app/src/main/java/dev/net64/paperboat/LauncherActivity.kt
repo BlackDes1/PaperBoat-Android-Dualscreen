@@ -80,6 +80,9 @@ class LauncherActivity : ComponentActivity() {
         when {
             requested != null && GameAssets.romFile(this, requested).isFile -> extractRom(requested)
             pending != null -> extractRom(pending)
+            // A restart from Mods/Saves goes back into the game it left.
+            intent.getBooleanExtra(EXTRA_START_GAME, false) && GameAssets.activeRegion(this) in playable ->
+                startGame(GameAssets.activeRegion(this))
             playable.size == 1 -> startGame(playable[0])
             playable.size > 1 -> showRegionChoice(playable)
             else -> setBusy(false, romInstructions)
