@@ -42,6 +42,8 @@ object CompanionBridge {
 
     @JvmStatic private external fun nativeSetAltAssets(on: Boolean)
 
+    @JvmStatic private external fun nativeSetFastForward(steps: Int)
+
     fun page(page: Int): String =
         if (!available) "" else runCatching { nativePage(page) }.getOrDefault("")
 
@@ -74,4 +76,11 @@ object CompanionBridge {
     fun setAltAssets(on: Boolean) {
         if (available) logged("nativeSetAltAssets") { nativeSetAltAssets(on) }
     }
+
+    /** Fast forward: 1 (off), 2, 3 or 4 game frames per drawn frame. Not kept across restarts. */
+    var fastForward = 1
+        set(value) {
+            field = value.coerceIn(1, 4)
+            if (available) logged("nativeSetFastForward") { nativeSetFastForward(field) }
+        }
 }

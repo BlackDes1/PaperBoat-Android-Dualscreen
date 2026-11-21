@@ -122,7 +122,7 @@ class DualScreenController(private val activity: Activity) {
     private fun Activity.display(): Display? =
         if (android.os.Build.VERSION.SDK_INT >= 30) display else @Suppress("DEPRECATION") windowManager.defaultDisplay
 
-    private fun newView(context: Context) = CompanionView(context, settings) { handler.post { apply() } }
+    private fun newView(context: Context) = CompanionView(context, settings)
 
     private fun ensureDocked() {
         val layout = root ?: return

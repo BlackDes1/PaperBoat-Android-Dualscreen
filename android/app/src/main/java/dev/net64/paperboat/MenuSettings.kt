@@ -18,6 +18,9 @@ sealed class MenuSetting(val key: String, val label: String, val help: String) {
     abstract fun applyStep(config: GameConfig, step: Int)
     abstract fun describe(config: GameConfig): String
 
+    /** Back to the default (Reset on the Settings page). */
+    open fun reset(config: GameConfig) = config.reset(key)
+
     /** Stored as 0/1, like every engine checkbox. */
     class Toggle(key: String, label: String, help: String, private val default: Boolean) :
         MenuSetting(key, label, help) {
@@ -81,12 +84,71 @@ sealed class MenuSetting(val key: String, val label: String, val help: String) {
     }
 }
 
+/**
+ * A setting the Android side keeps itself (SharedPreferences), not the engine:
+ * the dual-screen layout. [get] and [set] work on the option index.
+ */
+class PrefChoice(
+    key: String,
+    label: String,
+    help: String,
+    private val default: Int,
+    private val options: List<String>,
+    private val get: () -> Int,
+    private val set: (Int) -> Unit,
+) : MenuSetting(key, label, help) {
+    override fun stepCount() = options.size
+    override fun currentStep(config: GameConfig) = get().coerceIn(0, options.size - 1)
+    override fun applyStep(config: GameConfig, step: Int) = set(step)
+    override fun describe(config: GameConfig) = options[currentStep(config)]
+    override fun reset(config: GameConfig) = set(default)
+}
+
 /** A row that opens a screen of its own, for settings that don't fit ◀ value ▶. */
 class MenuLink(val label: String, val help: String, val activity: Class<out android.app.Activity>)
 
 class MenuSection(val title: String, val settings: List<MenuSetting>, val links: List<MenuLink> = emptyList())
 
 object MenuSettings {
+
+    /** Set by SettingsActivity before the sections are used (the dual-screen rows need it). */
+    lateinit var context: android.content.Context
+
+    private val companion by lazy { dev.net64.paperboat.companion.CompanionSettings(context) }
+
+    private fun dualScreen() = MenuSection(
+        "Dual screen",
+        listOf(
+            PrefChoice(
+                "android.companion.mode", "Screens",
+                "Where the 3DS-style bottom screen goes. Auto uses a second display when there is one.",
+                0, dev.net64.paperboat.companion.CompanionSettings.Mode.entries.map { it.label },
+                { companion.mode.ordinal },
+                { companion.mode = dev.net64.paperboat.companion.CompanionSettings.Mode.entries[it] },
+            ),
+            PrefChoice(
+                "android.companion.orientation", "Orientation",
+                "With both screens on one display: side by side in landscape, stacked in portrait.",
+                0, dev.net64.paperboat.companion.CompanionSettings.Orientation.entries.map { it.label },
+                { companion.orientation.ordinal },
+                { companion.orientation = dev.net64.paperboat.companion.CompanionSettings.Orientation.entries[it] },
+            ),
+            PrefChoice(
+                "android.companion.size", "Size",
+                "With both screens on one display: the 3DS's proportions, or as large a game as fits.",
+                0, listOf("3DS size", "Large game"),
+                { if (companion.original3ds) 0 else 1 },
+                { companion.original3ds = it == 0 },
+            ),
+            PrefChoice(
+                "android.companion.side", "Bottom screen side",
+                "Side by side: which side the bottom screen sits on.",
+                0, listOf("Right", "Left"),
+                { if (companion.swapSides) 1 else 0 },
+                { companion.swapSides = it == 1 },
+            ),
+        ),
+    )
 
     private fun volume(key: String, label: String) =
         MenuSetting.Range("gSettings.Volume.$key", label, "0 mutes it.", 100, 0, 100, 10, "%")
@@ -144,6 +206,7 @@ object MenuSettings {
                 ),
             ),
         ),
+        dualScreen(),
         MenuSection(
             "Audio",
             listOf(

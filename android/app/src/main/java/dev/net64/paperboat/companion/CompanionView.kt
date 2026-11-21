@@ -33,7 +33,6 @@ import kotlin.math.min
 class CompanionView(
     context: Context,
     private val settings: CompanionSettings,
-    private val onOptionsChanged: () -> Unit,
 ) : View(context) {
 
     var fill = false
@@ -53,10 +52,9 @@ class CompanionView(
         RECIPES("Recipes", CompanionBridge.PAGE_RECIPES),
         BADGES("Badges", CompanionBridge.PAGE_BADGES),
         ITEMS("Items", CompanionBridge.PAGE_ITEMS),
-        OPTIONS("Options", -1),
     }
 
-    private val railTabs = Tab.entries.filter { it != Tab.OPTIONS }
+    private val railTabs = Tab.entries
 
     private var tab = Tab.entries.getOrElse(settings.lastTab) { Tab.STATS }
 
@@ -144,7 +142,7 @@ class CompanionView(
             dirty = true
             val battle = stats.optInt("battle") == 1
             // Like the 3DS: a battle brings up the status page.
-            if (battle && !wasBattle && tab != Tab.OPTIONS) selectTab(Tab.STATS)
+            if (battle && !wasBattle) selectTab(Tab.STATS)
             wasBattle = battle
         }
         if (tab.page > CompanionBridge.PAGE_STATS) {
@@ -203,11 +201,14 @@ class CompanionView(
     }
 
     /** A brown button with a white label. */
-    private fun chip(c: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, label: String, scale: Float, on: Boolean = true) {
+    private fun chip(
+        c: Canvas, x0: Float, y0: Float, x1: Float, y1: Float, label: String, scale: Float,
+        on: Boolean = true, lit: Boolean = false,
+    ) {
         round(x0, y0, x1, y1, 7f, if (on) COL_PANEL_EDGE else COL_BTN_OFF, c)
-        round(x0 + 2, y0 + 2, x1 - 2, y1 - 2, 5f, if (on) COL_BTN else COL_BTN_OFF, c)
+        round(x0 + 2, y0 + 2, x1 - 2, y1 - 2, 5f, if (lit) COL_GOLD else if (on) COL_BTN else COL_BTN_OFF, c)
         val s = art.fit(label, x1 - x0 - 6f, scale, scale * 0.6f)
-        art.textCentered(c, (x0 + x1) / 2f, (y0 + y1) / 2f - 8f * s, label, s, white = true, alpha = if (on) 255 else 150)
+        art.textCentered(c, (x0 + x1) / 2f, (y0 + y1) / 2f - 8f * s, label, s, white = !lit, alpha = if (on) 255 else 150)
     }
 
     private fun bar(c: Canvas, x: Float, y: Float, w: Float, h: Float, v: Int, max: Int, col: Int) {
@@ -313,7 +314,6 @@ class CompanionView(
                 Tab.RECIPES -> itemIcon(c, CompanionArt.ITEM_FRYING_PAN, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
                 Tab.BADGES -> icon(c, CompanionArt.BP, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
                 Tab.ITEMS -> itemIcon(c, CompanionArt.ITEM_MUSHROOM, cx - iconSize / 2, y0 + 2, iconSize, !enabled)
-                Tab.OPTIONS -> Unit
             }
             val s = art.fit(t.label, railX1 - 8f, 0.62f, 0.45f)
             art.textCentered(c, cx, y1 - 2f - 15f * s, t.label, s, alpha = if (enabled) 255 else 120)
@@ -321,30 +321,32 @@ class CompanionView(
         }
     }
 
-    /** Options, then the shortcuts the 3DS screen offers in the world: Items, Partner, Pause. */
+    /**
+     * Fast forward, then the shortcuts the 3DS screen offers in the world:
+     * Items, Partner, Pause. Those three are greyed out whenever the game would
+     * refuse them (the prologue's intro, cutscenes, battles, menus already open).
+     */
     private fun drawButtons(c: Canvas) {
-        val battle = stats.optInt("battle") == 1
-        val world = inGame() && !battle
+        val menus = inGame() && stats.optInt("menus", 1) == 1 && stats.optInt("battle") == 0
         val gap = 4f
         val w = (gridW - 16f - gap * 3) / 4f
-        fun button(i: Int, label: String, on: Boolean, action: () -> Unit) {
+        fun button(i: Int, label: String, on: Boolean, lit: Boolean = false, action: () -> Unit) {
             val x0 = 8f + i * (w + gap)
-            chip(c, x0, btnY0, x0 + w, btnY1, label, 0.8f, on)
+            chip(c, x0, btnY0, x0 + w, btnY1, label, 0.8f, on, lit)
             if (on) hits += Hit(RectF(x0, btnY0, x0 + w, btnY1), action)
         }
-        button(0, if (tab == Tab.OPTIONS) "Back" else "Options", true) {
-            selectTab(if (tab == Tab.OPTIONS) Tab.STATS else Tab.OPTIONS)
+        val ff = CompanionBridge.fastForward
+        button(0, if (ff > 1) ">> ${ff}x" else ">> 1x", true, lit = ff > 1) {
+            // Off, 2x, 3x, 4x, off
+            CompanionBridge.fastForward = if (ff >= 4) 1 else ff + 1
+            invalidate()
         }
-        button(1, "Items", world) { CompanionBridge.request(CompanionBridge.REQ_ITEM_MENU) }
-        button(2, "Partner", world) { CompanionBridge.request(CompanionBridge.REQ_PARTNER_MENU) }
-        button(3, "Pause", world) { CompanionBridge.request(CompanionBridge.REQ_PAUSE) }
+        button(1, "Items", menus) { CompanionBridge.request(CompanionBridge.REQ_ITEM_MENU) }
+        button(2, "Partner", menus) { CompanionBridge.request(CompanionBridge.REQ_PARTNER_MENU) }
+        button(3, "Pause", menus) { CompanionBridge.request(CompanionBridge.REQ_PAUSE) }
     }
 
     private fun drawPage(c: Canvas) {
-        if (tab == Tab.OPTIONS) {
-            drawOptions(c)
-            return
-        }
         if (!inGame()) {
             drawTitle(c)
             return
@@ -357,7 +359,6 @@ class CompanionView(
             Tab.RECIPES -> drawRecipes(c)
             Tab.BADGES -> drawBadges(c)
             Tab.ITEMS -> drawItems(c)
-            Tab.OPTIONS -> Unit
         }
     }
 
@@ -699,35 +700,6 @@ class CompanionView(
         })
     }
 
-    // ---- Options -------------------------------------------------------------------------
-
-    private fun drawOptions(c: Canvas) {
-        pageTitle(c, "Options", "Dual screen")
-        var y = bodyY
-        fun option(label: String, value: String, onTap: () -> Unit) {
-            tile(c, cx0, y, cx1 - 2f, y + 30f, 7f, COL_PANEL)
-            art.text(c, cx0 + 8f, y + 8f, label, 0.8f)
-            art.textRight(c, cx1 - 10f, y + 8f, value, art.fit(value, 130f, 0.8f, 0.5f), alpha = 210)
-            hits += Hit(RectF(cx0, y, cx1, y + 30f)) { onTap(); onOptionsChanged(); invalidate() }
-            y += 36f
-        }
-        option("Screens", settings.mode.label) {
-            val all = CompanionSettings.Mode.entries
-            settings.mode = all[(settings.mode.ordinal + 1) % all.size]
-        }
-        option("Orientation", settings.orientation.label) {
-            val all = CompanionSettings.Orientation.entries
-            settings.orientation = all[(settings.orientation.ordinal + 1) % all.size]
-        }
-        option("Size", if (settings.original3ds) "3DS size" else "Large game") {
-            settings.original3ds = !settings.original3ds
-        }
-        option("Menu side", if (settings.swapSides) "Left" else "Right") {
-            settings.swapSides = !settings.swapSides
-        }
-        art.text(c, cx0 + 2f, 190f, "Layout after Star Haven's 3DS screen.", 0.6f, alpha = 170)
-    }
-
     // ---- touch ------------------------------------------------------------------------------
     private var downX = 0f
     private var downY = 0f
@@ -805,5 +777,6 @@ class CompanionView(
         val COL_OFF = Color.rgb(200, 185, 165)
         val COL_DARK_CHIP = Color.argb(200, 60, 36, 20)
         val COL_MARKER = Color.rgb(220, 80, 30)
+        val COL_GOLD = Color.rgb(240, 176, 40)
     }
 }

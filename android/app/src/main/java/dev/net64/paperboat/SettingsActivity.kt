@@ -41,6 +41,7 @@ class SettingsActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        MenuSettings.context = applicationContext
         config = GameConfig.load(this)
         buildUi()
         showSection(0)
@@ -174,7 +175,7 @@ class SettingsActivity : ComponentActivity() {
             .setTitle("Reset ${current.title}?")
             .setMessage("Every setting on this page goes back to its default.")
             .setPositiveButton("Reset") { _, _ ->
-                current.settings.forEach { config.reset(it.key) }
+                current.settings.forEach { it.reset(config) }
                 save()
                 showSection(section)
             }

@@ -114,6 +114,13 @@ void companion_store_tattle_text(int actorType, const char* text) {
 
 } // extern "C"
 
+// Fast forward from the bottom screen: logic frames per drawn frame (1 = off).
+static std::atomic<int> sFastForward { 1 };
+
+extern "C" int port_fast_forward_steps(void) {
+    return sFastForward.load(std::memory_order_relaxed);
+}
+
 // "Use Alternate Assets" (HD texture packs) set from the Android menus. CVars
 // belong to the game thread, so the value waits here for the next frame.
 static std::atomic<int> sAltAssetsRequest { -1 };
@@ -152,6 +159,12 @@ std::string CopyPage(int page) {
 } // namespace
 
 extern "C" {
+
+/** Fast forward: 1 (off) to 4 logic frames per drawn frame. */
+JNIEXPORT void JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_nativeSetFastForward(JNIEnv*, jclass,
+                                                                                              jint steps) {
+    sFastForward = steps < 1 ? 1 : (steps > 4 ? 4 : steps);
+}
 
 /** Turns HD textures (alternate assets) on or off from the next game frame. */
 JNIEXPORT void JNICALL Java_dev_net64_paperboat_companion_CompanionBridge_nativeSetAltAssets(JNIEnv*, jclass,

@@ -532,6 +532,18 @@ static void build_stats(JsonBuf* b) {
     jb_int(b, "battle", mode == GAME_MODE_BATTLE);
     jb_int(b, "paused", mode == GAME_MODE_PAUSE);
     jb_int(b, "peach", (gGameStatusPtr->peachFlags & PEACH_FLAG_IS_PEACH) != 0);
+    /* whether the Items / Partner / Pause shortcuts can open their menus now:
+     * the checks check_input_open_menus() makes (no menus in the prologue's
+     * intro, the epilogue, cutscenes, or while input is off) */
+    {
+        s32 story = evt_get_variable(NULL, GB_StoryProgress);
+        s32 menus = inGame && mode == GAME_MODE_WORLD && gGameStatusPtr->demoState == 0 &&
+                    !(gGameStatusPtr->peachFlags & PEACH_FLAG_IS_PEACH) && story != STORY_INTRO &&
+                    story < STORY_EPILOGUE && gPlayerStatus.inputDisabledCount == 0 &&
+                    !(gPlayerStatus.flags & PS_FLAG_PAUSE_DISABLED) &&
+                    !(gOverrideFlags & GLOBAL_OVERRIDES_DISABLE_MENUS);
+        jb_int(b, "menus", menus);
+    }
     if (!inGame) {
         jb_raw(b, "}");
         return;

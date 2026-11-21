@@ -97,6 +97,10 @@ void boot_main(void* data) {
     while (true) {}
 }
 
+#ifdef PORT
+extern s32 port_fast_forward_steps(void);
+#endif
+
 void gfxRetrace_Callback(s32 gfxTaskNum) {
     profiler_rsp_started(PROFILER_RSP_GFX);
     if (ResetGameState != RESET_STATE_NONE) {
@@ -121,6 +125,12 @@ void gfxRetrace_Callback(s32 gfxTaskNum) {
     } else {
         D_80073E0A ^= 1;
         if (D_80073E0A == 0) {
+#ifdef PORT
+            // Port: fast forward (Android bottom screen) runs extra logic frames, drawing only the last.
+            for (s32 ff = port_fast_forward_steps(); ff > 1; ff--) {
+                step_game_loop();
+            }
+#endif
             step_game_loop();
             D_80073E08 = 1;
 
