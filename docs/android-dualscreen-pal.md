@@ -138,3 +138,8 @@ US-only build.
 * Menu, Settings and Button mapping run in the `:menu` process, the launcher
   in `:launcher`, the game in the main process. The game process cannot be
   restarted in place: quitting it ends the process and returns to the menu.
+* HD texture packs keep their textures under `alt/`; the engine uses them
+  only with `gEnhancements.Mods.AlternateAssets` on (PC: Mods > Use Alternate
+  Assets, or Tab). Android sets it from the Mods screen (switch, and on import
+  of a pack) and Settings > Graphics (`HdTextures.kt`); a running game takes
+  it from the next frame (CompanionStore.cpp).
