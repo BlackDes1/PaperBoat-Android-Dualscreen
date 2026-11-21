@@ -60,11 +60,6 @@ endif()
 
 if(ANDROID)
     add_compile_definitions(USE_OPENGLES=1)
-    # The decomp's C (display-list macros, unions over Gfx words) breaks under
-    # strict aliasing: CI textures and the dialogue font render as noise. NDK
-    # r23+ no longer puts -fno-strict-aliasing in its Release flags, so state it
-    # here for the game, libultraship and Torch alike.
-    add_compile_options(-fno-strict-aliasing)
 endif()
 
 set(NATO_PHONETIC_ALPHABET

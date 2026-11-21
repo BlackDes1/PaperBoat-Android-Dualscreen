@@ -166,9 +166,9 @@ android {
                     "-DSDL_SHARED=ON",
                     "-DSDL_STATIC=OFF",
                     "-DHAVE_LD_VERSION_SCRIPT=OFF",
-                    // Every variant, debug included. The game's C needs
-                    // -fno-strict-aliasing, which NDK r23+ Release flags no
-                    // longer carry: CMakeLists.txt adds it for Android.
+                    // Every variant, debug included. Only the Release flags
+                    // carry -fno-strict-aliasing, and the game's C needs it:
+                    // at -O2 aliasing miscompiles it into graphical glitches.
                     // The plugin otherwise builds release as RelWithDebInfo.
                     "-DCMAKE_BUILD_TYPE=Release"
                 )
