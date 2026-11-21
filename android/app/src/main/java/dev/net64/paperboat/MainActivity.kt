@@ -13,18 +13,22 @@ import android.widget.FrameLayout
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import dev.net64.paperboat.companion.DualScreenController
 import org.libsdl.app.SDLActivity
 
 /**
  * The game. The on-screen controller is the engine's own, drawn inside the GL
- * surface (src/port/ui/TouchControls.cpp); the only thing layered over SDL is a
- * Mods button, shown while the engine's menu is up.
+ * surface (src/port/ui/TouchControls.cpp). Beside SDL's surface sits the
+ * 3DS-style bottom screen ([DualScreenController]), on this display or a
+ * second one; over it, a Mods button shown while the engine's menu is up.
  *
  * [LauncherActivity] guarantees pm64.o2r exists before this activity starts.
  */
 class MainActivity : SDLActivity() {
 
     private lateinit var modsButton: Button
+
+    private var dualScreen: DualScreenController? = null
 
     private var menuOpen = false
 
@@ -46,6 +50,7 @@ class MainActivity : SDLActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         goFullscreen()
+        dualScreen = DualScreenController(this).also { it.attach() }
         addModsButton()
     }
 
@@ -80,6 +85,8 @@ class MainActivity : SDLActivity() {
 
     override fun onResume() {
         super.onResume()
+        dualScreen?.start()
+        dualScreen?.reapplyOrientationSoon()
         // Also re-sync now, so returning here never shows a stale menu state.
         syncMenuState()
         handler.removeCallbacks(menuWatcher)
@@ -88,11 +95,14 @@ class MainActivity : SDLActivity() {
 
     override fun onPause() {
         handler.removeCallbacks(menuWatcher)
+        // A Presentation outliving its activity's foreground leaks its window.
+        dualScreen?.stop()
         super.onPause()
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(menuWatcher)
+        dualScreen?.stop()
         super.onDestroy()
     }
 

@@ -8,6 +8,7 @@
 #include "pause/pause_common.h"
 #include "world/partners.h"
 #include "world/partner/lakilester.h"
+#include "port/companion/companion.h"
 
 enum WorldMenuStates {
     WORLD_MENU_STATE_NONE       = 0,
@@ -229,6 +230,41 @@ void check_input_open_menus(void) {
     if (evt_get_variable(nullptr, GB_StoryProgress) >= STORY_EPILOGUE) {
         currentButtons &= ~(BUTTON_C_LEFT | BUTTON_C_RIGHT);
         pressedButtons &= ~(BUTTON_C_LEFT | BUTTON_C_RIGHT);
+    }
+
+    // Port: taps on the companion screen (src/port/companion), allowed exactly when
+    // the matching popup menu could open (after Star Haven's 3DS bottom screen).
+    // Taps don't come through the buttons, so a tap while input is off is refused
+    // here rather than queued: a second partner switch during the first would
+    // disable input twice.
+    {
+        s32 req = companion_take_request();
+        if (req != COMPANION_REQ_NONE && gGameStatusPtr->demoState == DEMO_STATE_NONE) {
+            s32 partnerDrives = partnerStatus->partnerActionState != PARTNER_ACTION_NONE &&
+                (partnerStatus->actingPartner == PARTNER_SUSHIE || partnerStatus->actingPartner == PARTNER_LAKILESTER ||
+                 partnerStatus->actingPartner == PARTNER_BOW);
+            s32 inputOff = partnerDrives ? partnerStatus->inputDisabledCount : playerStatus->inputDisabledCount;
+            if (inputOff != 0 || WorldMenuState != WORLD_MENU_STATE_NONE ||
+                evt_get_variable(nullptr, GB_StoryProgress) >= STORY_EPILOGUE) {
+                sfx_play_sound(SOUND_MENU_ERROR);
+            } else if (req == COMPANION_REQ_ITEM_MENU) {
+                pressedButtons |= BUTTON_C_LEFT;
+            } else if (req == COMPANION_REQ_PARTNER_MENU) {
+                pressedButtons |= BUTTON_C_RIGHT;
+            } else if (req == COMPANION_REQ_PAUSE) {
+                pressedButtons |= BUTTON_START;
+            } else if (req > COMPANION_REQ_PARTNER_BASE) {
+                s32 partner = req - COMPANION_REQ_PARTNER_BASE;
+                if (partner < ARRAY_COUNT(playerData->partners) && partner != playerData->curPartner &&
+                    playerData->partners[partner].enabled && can_open_world_menu(currentButtons, BUTTON_C_RIGHT) &&
+                    !(playerStatus->flags & PS_FLAG_NO_CHANGE_PARTNER)) {
+                    switch_to_partner(partner);
+                } else {
+                    sfx_play_sound(SOUND_MENU_ERROR);
+                }
+                return;
+            }
+        }
     }
 
     switch (WorldMenuState) {

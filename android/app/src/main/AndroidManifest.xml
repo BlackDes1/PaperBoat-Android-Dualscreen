@@ -45,12 +45,13 @@
             android:name="SDL_ENV.SDL_ANDROID_TRAP_BACK_BUTTON"
             android:value="1" />
 
-        <!-- SDL overrides screenOrientation when its video subsystem starts,
-             promoting a resizable window to FULL_USER. Naming both landscapes
-             pins it while still allowing either way up. -->
+        <!-- SDL overrides screenOrientation when its video subsystem starts.
+             Portrait is allowed for the dual-screen layout (top screen over
+             bottom screen); companion/DualScreenController applies the
+             player's orientation choice once SDL has set its own. -->
         <meta-data
             android:name="SDL_ENV.SDL_IOS_ORIENTATIONS"
-            android:value="LandscapeLeft LandscapeRight" />
+            android:value="LandscapeLeft LandscapeRight Portrait" />
 
         <!-- Its own process: extraction leaves Torch's decoded assets behind,
              and ending the process hands them back before the game starts. -->
@@ -75,7 +76,7 @@
             android:label="@string/app_name"
             android:launchMode="singleInstance"
             android:preferMinimalPostProcessing="true"
-            android:screenOrientation="sensorLandscape">
+            android:screenOrientation="fullUser">
             <!-- Let Android know that we can handle some USB devices and should receive this event -->
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
