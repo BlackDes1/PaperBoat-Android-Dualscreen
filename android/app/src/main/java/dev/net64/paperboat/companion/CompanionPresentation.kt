@@ -5,6 +5,9 @@ import android.content.Context
 import android.os.Bundle
 import android.view.Display
 import android.view.WindowManager
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 /**
  * The bottom screen on a second physical display (dual-screen handhelds,
@@ -26,5 +29,21 @@ class CompanionPresentation(
         val v = build(context)
         view = v
         setContentView(v)
+        hideSystemBars()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemBars()
+    }
+
+    /** The whole second screen is the bottom screen: no navigation bar over it. */
+    private fun hideSystemBars() {
+        val w = window ?: return
+        WindowCompat.setDecorFitsSystemWindows(w, false)
+        WindowInsetsControllerCompat(w, w.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
     }
 }
