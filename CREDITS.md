@@ -56,7 +56,9 @@ The Star Haven banner is not used in this project.
 - **SDL2** — window, input and audio. https://www.libsdl.org
 
 Each keeps its own license; see the projects above and the files in
-this repository.
+this repository. `LICENSE` (Apache 2.0) covers this repository's own
+work; `LICENSE-PaperBoat` is PaperBoat's license (CC0 1.0), kept for the
+code that comes from it.
 
 ## Android dual-screen work
 
