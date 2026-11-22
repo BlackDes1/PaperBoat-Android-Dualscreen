@@ -1,3 +1,8 @@
+> **PaperBoat Android Dualscreen**: the Android port with a 3DS-style second
+> screen after Star Haven, US and European releases in one APK, mods and HD
+> texture packs. Credits and notices: [CREDITS.md](CREDITS.md). Details:
+> [docs/android-dualscreen-pal.md](docs/android-dualscreen-pal.md).
+
 # PaperBoat
 *Harbour Masters port of Paper Mario 64*
 
